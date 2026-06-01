@@ -1,0 +1,11 @@
+{
+  "nav": { "dashboard": "Dashboard", "cropPlan": "Crop Plan", "profile": "Profile", "logout": "Logout" },
+  "landing": { "hero": "AI-powered farming advice for Tamil Nadu farmers", "login": "Login", "register": "Register Free" },
+  "dashboard": { "greeting": "Good day", "weather": "Weather", "yourLand": "Your Land", "recentChats": "Recent Chats" },
+  "chat": { "placeholder": "Ask about your crops...", "thinking": "Thinking...", "listenBtn": "Listen" },
+  "cropPlan": { "title": "Crop Plan", "newPlan": "New Plan", "generating": "Generating your plan..." },
+  "profile": { "title": "My Profile", "soilReport": "Soil Test Report", "uploadSoil": "Upload your lab soil test report" },
+  "register": { "title": "Register", "farmerID": "Government Farmer ID", "name": "Full Name", "phone": "Phone Number", "drawLand": "Draw your land boundary on the map", "createPassword": "Create Password" },
+  "login": { "title": "Welcome back", "phone": "Phone Number", "password": "Password", "loginBtn": "Login" },
+  "errors": { "unauthorized": "Please login to continue", "networkError": "Network error. Please try again." }
+}

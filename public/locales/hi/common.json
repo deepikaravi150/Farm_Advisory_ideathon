@@ -1,0 +1,11 @@
+{
+  "nav": { "dashboard": "डैशबोर्ड", "cropPlan": "फसल योजना", "profile": "प्रोफ़ाइल", "logout": "लॉग आउट" },
+  "landing": { "hero": "तमिलनाडु के किसानों के लिए AI-आधारित कृषि सलाह", "login": "लॉग इन", "register": "मुफ़्त पंजीकरण" },
+  "dashboard": { "greeting": "नमस्ते", "weather": "मौसम", "yourLand": "आपकी भूमि", "recentChats": "हालिया बातचीत" },
+  "chat": { "placeholder": "अपनी फसल के बारे में पूछें...", "thinking": "सोच रहा हूँ...", "listenBtn": "सुनें" },
+  "cropPlan": { "title": "फसल योजना", "newPlan": "नई योजना", "generating": "आपकी योजना बनाई जा रही है..." },
+  "profile": { "title": "मेरी प्रोफ़ाइल", "soilReport": "मिट्टी परीक्षण रिपोर्ट", "uploadSoil": "अपनी मिट्टी परीक्षण रिपोर्ट अपलोड करें" },
+  "register": { "title": "पंजीकरण", "farmerID": "सरकारी किसान आईडी", "name": "पूरा नाम", "phone": "फोन नंबर", "drawLand": "मानचित्र पर अपनी भूमि की सीमा बनाएं", "createPassword": "पासवर्ड बनाएं" },
+  "login": { "title": "वापस स्वागत है", "phone": "फोन नंबर", "password": "पासवर्ड", "loginBtn": "लॉग इन" },
+  "errors": { "unauthorized": "कृपया लॉग इन करें", "networkError": "नेटवर्क त्रुटि। कृपया पुनः प्रयास करें।" }
+}
