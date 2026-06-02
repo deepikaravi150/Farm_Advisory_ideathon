@@ -153,7 +153,25 @@
     "days": "days",
     "tasks": "Tasks",
     "estimatedCost": "Estimated Cost",
-    "close": "Close"
+    "close": "Close",
+    "stage": "Stage",
+    "whatToDo": "What to do",
+    "forecastForStage": "Weather forecast for these days",
+    "weatherAlert": "Weather alert",
+    "alertsCount": "{count} weather alert(s)"
+  },
+  "planChat": {
+    "title": "Plan Assistant",
+    "subtitle": "Ask questions or request changes",
+    "emptyHint": "Chat to adjust your plan — shift dates, add stages, change costs and more.",
+    "examples": ["Shift sowing one week later", "Add an extra pest control stage", "Reduce the fertilizer budget"],
+    "placeholder": "Ask about or change your plan...",
+    "thinking": "Thinking...",
+    "error": "Sorry, something went wrong. Please try again.",
+    "proposedChange": "Proposed updated plan ({stages} stages)",
+    "apply": "Apply",
+    "dismiss": "Dismiss",
+    "applied": "Plan updated."
   },
   "assessment": {
     "title": "Let's build your crop plan",
@@ -178,6 +196,8 @@
     "finalCropPlaceholder": "e.g. Paddy, Tomato, Sugarcane...",
     "finalMidLabel": "Tell me about your current crop",
     "finalMidPlaceholder": "e.g. Growing paddy, sowed 3 weeks ago, looks healthy...",
+    "startDateLabel": "When do you plan to start?",
+    "startDateHint": "Your plan's schedule will be built from this date.",
     "finalUnsureMsg": "Thanks! I'll use your answers to suggest the best crops for your land.",
     "getSuggestions": "Get Crop Suggestions",
     "assessCrop": "Assess My Crop",

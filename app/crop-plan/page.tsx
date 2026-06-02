@@ -4,7 +4,8 @@ import { useTranslations } from 'next-intl';
 import Navbar from '@/components/layout/Navbar';
 import StateAssessmentModal, { type AssessmentPayload } from '@/components/crop-plan/StateAssessmentModal';
 import CropSuggestions from '@/components/crop-plan/CropSuggestions';
-import PlanFlowChart from '@/components/crop-plan/PlanFlowChart';
+import PlanTimeline from '@/components/crop-plan/PlanTimeline';
+import PlanChatPanel from '@/components/crop-plan/PlanChatPanel';
 import { Loader2, RefreshCw, Leaf } from 'lucide-react';
 import type { CropPlan, SuggestedCrop } from '@/lib/types/crop-plan';
 
@@ -23,7 +24,7 @@ export default function CropPlanPage() {
     fetch('/api/crop-plan').then(r => r.json()).then(plans => {
       if (Array.isArray(plans) && plans.length > 0) {
         const p = plans[0];
-        setActivePlan({ cropName: p.crop_name, milestones: p.milestones ?? [], totalBudgetEstimate: p.budget_estimate, harvestDate: p.harvest_date, sellWindow: p.sell_window, storageNotes: p.storage_notes });
+        setActivePlan({ cropName: p.crop_name, startDate: p.start_date, milestones: p.milestones ?? [], totalBudgetEstimate: p.budget_estimate, harvestDate: p.harvest_date, sellWindow: p.sell_window, storageNotes: p.storage_notes });
       } else {
         setShowModal(true);
       }
@@ -43,6 +44,7 @@ export default function CropPlanPage() {
           farmerState: state,
           cropName: payload.cropName,
           currentCropInfo: payload.info,
+          startDate: payload.startDate,
           assessment: payload.assessment,
         }),
       });
@@ -62,11 +64,21 @@ export default function CropPlanPage() {
   async function selectSuggestedCrop(crop: SuggestedCrop) {
     setActivePlan(crop);
     setSuggestions([]);
+    await savePlan(crop);
+  }
+
+  // Apply a plan change the farmer confirmed from the chat panel, and persist it.
+  async function applyPlanChange(updated: CropPlan) {
+    setActivePlan(updated);
+    await savePlan(updated);
+  }
+
+  async function savePlan(plan: CropPlan) {
     try {
       await fetch('/api/crop-plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'save', plan: crop }),
+        body: JSON.stringify({ action: 'save', plan }),
       });
     } catch { /* non-blocking — plan is already shown */ }
   }
@@ -104,20 +116,21 @@ export default function CropPlanPage() {
         )}
 
         {!loading && activePlan && (
-          <div className="bg-white rounded-2xl shadow border border-gray-100 p-6">
-            <PlanFlowChart
-              milestones={activePlan.milestones}
-              cropName={activePlan.cropName}
-              totalBudget={activePlan.totalBudgetEstimate}
-              harvestDate={activePlan.harvestDate}
-              sellWindow={activePlan.sellWindow}
-            />
-            {activePlan.storageNotes && (
-              <div className="mt-4 bg-earth-50 rounded-xl p-4 border border-earth-200">
-                <p className="text-sm font-medium text-earth-700 mb-1">{t('storageNotesTitle')}</p>
-                <p className="text-sm text-earth-600">{activePlan.storageNotes}</p>
-              </div>
-            )}
+          <div className="grid gap-6 lg:grid-cols-3 items-start">
+            {/* Timeline */}
+            <div className="lg:col-span-2 bg-white rounded-2xl shadow border border-gray-100 p-6">
+              <PlanTimeline plan={activePlan} />
+              {activePlan.storageNotes && (
+                <div className="mt-4 bg-earth-50 rounded-xl p-4 border border-earth-200">
+                  <p className="text-sm font-medium text-earth-700 mb-1">{t('storageNotesTitle')}</p>
+                  <p className="text-sm text-earth-600">{activePlan.storageNotes}</p>
+                </div>
+              )}
+            </div>
+            {/* Plan chatbot — interact with and edit the plan */}
+            <div className="lg:col-span-1 lg:sticky lg:top-6 h-[600px]">
+              <PlanChatPanel plan={activePlan} onApply={applyPlanChange} />
+            </div>
           </div>
         )}
 

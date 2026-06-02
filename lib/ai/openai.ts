@@ -14,17 +14,26 @@ export interface Message {
   content: string;
 }
 
+export interface ChatOptions {
+  /** Max output tokens. Raise for large structured responses (e.g. crop plans). */
+  maxTokens?: number;
+  /** Force a valid JSON object response (OpenAI json_object mode). */
+  json?: boolean;
+}
+
 /**
  * Core chat completion. Mirrors the previous Bedrock signature so route code
  * stays unchanged. `systemPrompt` is sent as the system message.
  */
 export async function chatWithBedrock(
   messages: Message[],
-  systemPrompt: string
+  systemPrompt: string,
+  options: ChatOptions = {}
 ): Promise<string> {
   const res = await client.chat.completions.create({
     model: chatModel,
-    max_tokens: 2048,
+    max_tokens: options.maxTokens ?? 2048,
+    ...(options.json ? { response_format: { type: 'json_object' as const } } : {}),
     messages: [
       { role: 'system', content: systemPrompt },
       ...messages.map((m) => ({ role: m.role, content: m.content })),

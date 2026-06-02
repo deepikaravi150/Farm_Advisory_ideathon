@@ -8,6 +8,7 @@ type FarmerState = 'planning_unsure' | 'planning_specific' | 'mid_grow';
 export interface AssessmentPayload {
   cropName?: string;
   info?: string;
+  startDate?: string;
   assessment: Record<string, string>;
 }
 
@@ -48,6 +49,8 @@ export default function StateAssessmentModal({ onSubmit, loading }: Props) {
   const [idx, setIdx] = useState(0);
   const [cropName, setCropName] = useState('');
   const [info, setInfo] = useState('');
+  const today = new Date().toISOString().split('T')[0];
+  const [startDate, setStartDate] = useState(today);
 
   const visible = useMemo(
     () => QUESTIONS.filter(q => !q.showIf || q.showIf(answers)),
@@ -87,9 +90,9 @@ export default function StateAssessmentModal({ onSubmit, loading }: Props) {
 
   function submitFinal() {
     const assessment = buildAssessment();
-    if (state === 'planning_specific') onSubmit(state, { cropName, assessment });
+    if (state === 'planning_specific') onSubmit(state, { cropName, startDate, assessment });
     else if (state === 'mid_grow') onSubmit(state, { info, assessment });
-    else onSubmit(state, { assessment });
+    else onSubmit(state, { startDate, assessment });
   }
 
   const total = visible.length;
@@ -207,6 +210,17 @@ export default function StateAssessmentModal({ onSubmit, loading }: Props) {
               <p className="text-sm text-gray-600 bg-brand-50 border border-brand-100 rounded-xl p-3">
                 {t('finalUnsureMsg')}
               </p>
+            )}
+
+            {/* Planting start date — anchors the whole plan's schedule. */}
+            {state !== 'mid_grow' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{t('startDateLabel')}</label>
+                <input type="date" value={startDate} min={today}
+                  onChange={e => setStartDate(e.target.value)}
+                  className="w-full border border-gray-300 rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-400" />
+                <p className="text-xs text-gray-400 mt-1">{t('startDateHint')}</p>
+              </div>
             )}
 
             <button onClick={submitFinal}

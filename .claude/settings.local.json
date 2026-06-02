@@ -20,7 +20,12 @@
       "PowerShell(ssh -i $key -o StrictHostKeyChecking=accept-new ubuntu@18.209.17.202 \"cd ~/farm-advisor && echo '=== rebuild ===' && docker compose build 2>&1 | grep -iE 'DONE [0-9]|naming to|ERROR|did not complete' | tail -6 && echo '=== restart ===' && docker compose up -d 2>&1 | grep -iE 'Started|Recreated|Running' && sleep 5 && echo '=== login response headers \\(dummy creds\\) ===' && curl -s -i -X POST http://localhost:3000/api/auth/login -H 'Content-Type: application/json' -d '{\\\\\"phone\\\\\":\\\\\"9999999999\\\\\",\\\\\"password\\\\\":\\\\\"x\\\\\"}' | grep -iE 'set-cookie|HTTP/'\")",
       "PowerShell(ssh -i $key -o StrictHostKeyChecking=accept-new ubuntu@18.209.17.202 \"cd ~/farm-advisor && docker compose logs --tail=40 web 2>&1 | grep -iE 'Login error|Exception|Error:|denied|index|name|at ' | grep -viE 'require node|security updates|aws.amazon|January 2027|receiving updates'\")",
       "Bash(ssh -i 'C:/Users/SyedMohammedEesa/OneDrive - GANIT BUSINESS SOLUTIONS PRIVATE LIMITED/Documents/Projects/ideathon/farmer-app-key.pem' -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 ubuntu@18.209.17.202 'echo \"=== whoami ===\"; whoami; echo \"=== home ===\"; ls -la ~; echo \"=== docker ===\"; which docker && docker --version; docker compose version 2>/dev/null || docker-compose version 2>/dev/null; echo \"=== containers ===\"; docker ps 2>/dev/null || sudo docker ps 2>/dev/null')",
-      "Bash(ssh -i 'C:/Users/SyedMohammedEesa/OneDrive - GANIT BUSINESS SOLUTIONS PRIVATE LIMITED/Documents/Projects/ideathon/farmer-app-key.pem' -o StrictHostKeyChecking=accept-new ubuntu@18.209.17.202 'cd ~/farm-advisor && echo \"=== top-level ===\"; ls -la; echo \"=== .env present? ===\"; test -f .env && echo \".env EXISTS \\($\\(wc -l < .env\\) lines\\)\" || echo \"NO .env\"; echo \"=== current health ===\"; curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/api/health; echo')"
+      "Bash(ssh -i 'C:/Users/SyedMohammedEesa/OneDrive - GANIT BUSINESS SOLUTIONS PRIVATE LIMITED/Documents/Projects/ideathon/farmer-app-key.pem' -o StrictHostKeyChecking=accept-new ubuntu@18.209.17.202 'cd ~/farm-advisor && echo \"=== top-level ===\"; ls -la; echo \"=== .env present? ===\"; test -f .env && echo \".env EXISTS \\($\\(wc -l < .env\\) lines\\)\" || echo \"NO .env\"; echo \"=== current health ===\"; curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/api/health; echo')",
+      "Bash(git push *)",
+      "Bash(git stash *)",
+      "Bash(npx tsc *)",
+      "Bash(node -e \"['en','hi','ta'].forEach\\(l=>{JSON.parse\\(require\\('fs'\\).readFileSync\\('public/locales/'+l+'/common.json','utf8'\\)\\);console.log\\(l,'OK'\\)}\\)\")",
+      "Bash(npm run *)"
     ]
   }
 }
