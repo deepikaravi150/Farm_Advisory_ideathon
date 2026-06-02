@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { MessageSquare, Clock } from 'lucide-react';
+import { ChevronRight, MessageSquare, Clock } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
 
 interface ChatEntry { chat_id: string; timestamp: string; summary: string; farming_context_tags: string[]; }
@@ -37,18 +37,26 @@ export default function ChatSummaryWidget() {
           <button
             key={chat.chat_id}
             onClick={() => handleChatClick(chat.chat_id)}
-            className="w-full p-4 text-left hover:bg-brand-50 transition-colors cursor-pointer"
+            className="group w-full p-4 text-left hover:bg-brand-50 focus:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-300 transition-colors cursor-pointer"
           >
-            <p className="text-sm text-gray-700 line-clamp-2">{chat.summary}</p>
-            <div className="flex items-center justify-between mt-2">
-              <div className="flex gap-1 flex-wrap">
-                {(chat.farming_context_tags ?? []).slice(0, 3).map(tag => (
-                  <span key={tag} className="text-xs bg-brand-100 text-brand-700 px-2 py-0.5 rounded-full">{tag}</span>
-                ))}
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 rounded-full bg-brand-100 p-2 text-brand-700 group-hover:bg-brand-600 group-hover:text-white transition-colors">
+                <MessageSquare className="w-4 h-4" />
               </div>
-              <span className="text-xs text-gray-400 flex items-center gap-1 flex-shrink-0">
-                <Clock className="w-3 h-3" />{formatDate(chat.timestamp)}
-              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-gray-800 line-clamp-2 group-hover:text-brand-800">{chat.summary}</p>
+                <div className="flex items-center justify-between mt-2 gap-3">
+                  <div className="flex gap-1 flex-wrap">
+                    {(chat.farming_context_tags ?? []).slice(0, 3).map(tag => (
+                      <span key={tag} className="text-xs bg-brand-100 text-brand-700 px-2 py-0.5 rounded-full">{tag}</span>
+                    ))}
+                  </div>
+                  <span className="text-xs text-gray-400 flex items-center gap-1 flex-shrink-0">
+                    <Clock className="w-3 h-3" />{formatDate(chat.timestamp)}
+                  </span>
+                </div>
+              </div>
+              <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-brand-600 transition-colors mt-1 flex-shrink-0" />
             </div>
           </button>
         ))}

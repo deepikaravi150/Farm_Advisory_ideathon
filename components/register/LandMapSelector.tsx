@@ -11,6 +11,46 @@ interface Props { onChange: (coords: Coordinate[]) => void; }
 const TN_CENTER: [number, number] = [11.1271, 78.6569];
 const ESRI_SAT = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
 const ESRI_LABELS = 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}';
+const TAMIL_NADU_PLACES = [
+  'Ariyalur',
+  'Chengalpattu',
+  'Chennai',
+  'Coimbatore',
+  'Cuddalore',
+  'Dharmapuri',
+  'Dindigul',
+  'Erode',
+  'Kallakurichi',
+  'Kanchipuram',
+  'Kanniyakumari',
+  'Karur',
+  'Krishnagiri',
+  'Madurai',
+  'Mayiladuthurai',
+  'Nagapattinam',
+  'Namakkal',
+  'Nilgiris',
+  'Perambalur',
+  'Pudukkottai',
+  'Ramanathapuram',
+  'Ranipet',
+  'Salem',
+  'Sivaganga',
+  'Tenkasi',
+  'Thanjavur',
+  'Theni',
+  'Thoothukudi',
+  'Tiruchirappalli',
+  'Tirunelveli',
+  'Tirupathur',
+  'Tiruppur',
+  'Tiruvallur',
+  'Tiruvannamalai',
+  'Tiruvarur',
+  'Vellore',
+  'Viluppuram',
+  'Virudhunagar',
+];
 
 /**
  * Exposes the Leaflet map instance via a ref so the search box can pan/zoom it.
@@ -107,12 +147,16 @@ export default function LandMapSelector({ onChange }: Props) {
       <form onSubmit={searchLocation} className="flex gap-2">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
-          <input
+          <select
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Search your village, town or district..."
-            className="w-full pl-9 pr-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-400"
-          />
+            className="w-full pl-9 pr-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 bg-white"
+          >
+            <option value="" disabled>Select district or place...</option>
+            {TAMIL_NADU_PLACES.map(place => (
+              <option key={place} value={place}>{place}</option>
+            ))}
+          </select>
         </div>
         <button type="submit" disabled={searching}
           className="px-4 py-2.5 bg-brand-600 text-white rounded-xl text-sm hover:bg-brand-700 disabled:opacity-50 font-medium flex-shrink-0">

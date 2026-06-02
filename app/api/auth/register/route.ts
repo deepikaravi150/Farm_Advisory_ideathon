@@ -3,11 +3,13 @@ import { z } from 'zod';
 import { putItem, getItem, Tables } from '@/lib/aws/dynamodb';
 import { hashPassword } from '@/lib/auth';
 import { generateId } from '@/lib/utils';
+import { findFarmersByPhone } from '../farmers';
 
 const RegisterSchema = z.object({
   farmerId: z.string().min(1, 'Farmer ID is required'),
   name: z.string().min(2, 'Name is required'),
   phone: z.string().regex(/^\d{10}$/, 'Enter a valid 10-digit phone number'),
+  location: z.string().optional(),
   landCoordinates: z.array(z.object({ lat: z.number(), lng: z.number() })).min(3),
   typography: z.string().optional(),
   landAreaAcres: z.number().positive(),
@@ -20,10 +22,17 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const data = RegisterSchema.parse(body);
 
-    // Check if farmer ID or phone already exists
+    // Check if farmer ID or phone already exists. Login uses phone numbers, so
+    // duplicate phone records can make a valid account look impossible to enter.
     const existing = await getItem(Tables.FARMER_PROFILES, { farmer_id: data.farmerId });
     if (existing) {
       return NextResponse.json({ error: 'Farmer ID already registered' }, { status: 409 });
+    }
+
+    const existingPhone = await findFarmersByPhone(data.phone);
+
+    if (existingPhone.length) {
+      return NextResponse.json({ error: 'Phone number already registered. Please login instead.' }, { status: 409 });
     }
 
     const passwordHash = await hashPassword(data.password);
@@ -34,6 +43,7 @@ export async function POST(req: NextRequest) {
       unique_id: uniqueId,
       phone: data.phone,
       name: data.name,
+      location: data.location ?? '',
       land_coordinates: data.landCoordinates,
       typography: data.typography ?? '',
       land_area_acres: data.landAreaAcres,

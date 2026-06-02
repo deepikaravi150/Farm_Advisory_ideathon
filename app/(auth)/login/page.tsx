@@ -16,10 +16,12 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
     try {
+      const phoneDigits = phone.replace(/\D/g, '');
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone, password }),
+        credentials: 'same-origin',
+        body: JSON.stringify({ phone: phoneDigits, password }),
       });
       const data = await res.json();
       if (!res.ok) { setError(data.error ?? 'Login failed'); return; }

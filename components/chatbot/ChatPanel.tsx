@@ -32,9 +32,15 @@ export default function ChatPanel() {
         body: JSON.stringify({ message: msg, locale, history: messages.slice(-6) }),
       });
       const data = await res.json();
+      if (!res.ok) {
+        setMessages([...newMessages, { role: 'assistant', content: data.error ?? 'Chat failed. Please try again.' }]);
+        return;
+      }
       if (data.reply) {
         setMessages([...newMessages, { role: 'assistant', content: data.reply }]);
         setLastReply(data.reply);
+      } else {
+        setMessages([...newMessages, { role: 'assistant', content: 'I did not receive a reply. Please try again.' }]);
       }
     } catch {
       setMessages([...newMessages, { role: 'assistant', content: 'Sorry, something went wrong. Please try again.' }]);

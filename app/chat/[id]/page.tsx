@@ -14,22 +14,24 @@ export default async function ChatDetailPage(props: any) {
   const farmer = token ? verifyToken(token) : null;
   if (!farmer) redirect('/login');
 
-  // Fetch the specific chat
+  // Chat history is keyed by farmer and timestamp, so load the farmer's recent
+  // chats and match the stable chat_id used in the dashboard link.
   const chats = await queryItems({
     TableName: Tables.CHAT_HISTORY,
-    KeyConditionExpression: 'farmer_id = :fid AND chat_id = :cid',
+    KeyConditionExpression: 'farmer_id = :fid',
     ExpressionAttributeValues: {
       ':fid': farmer.farmerId,
-      ':cid': params.id,
     },
-    Limit: 1,
+    ScanIndexForward: false,
+    Limit: 25,
   });
 
-  if (!chats.length) {
+  const chat = chats.find((entry) => entry.chat_id === params.id);
+
+  if (!chat) {
     redirect('/dashboard');
   }
 
-  const chat = chats[0];
   const messages = Array.isArray(chat.messages) ? chat.messages : [];
 
   return (

@@ -20,6 +20,22 @@ const ChatSchema = z.object({
   })).default([]),
 });
 
+function fallbackReply(message: string, locale: 'en' | 'hi' | 'ta') {
+  if (locale === 'ta') {
+    return `AI service is not connected right now, but I can still help with basic guidance.\n\nFor your question: "${message}"\n\nPlease check your soil moisture, recent rainfall, crop stage, and any pest symptoms. For Tamil Nadu conditions, choose crops based on available water: paddy for good water availability, millets or pulses for lower water, and vegetables only if irrigation is reliable.`;
+  }
+
+  if (locale === 'hi') {
+    return `AI service is not connected right now, but I can still help with basic guidance.\n\nFor your question: "${message}"\n\nPlease check soil moisture, recent rainfall, crop stage, and pest symptoms. If water is sufficient, paddy can work well. If water is limited, prefer millets or pulses. Use vegetables only when irrigation is reliable.`;
+  }
+
+  return `AI service is not connected right now, but I can still help with basic guidance.\n\nFor your question: "${message}"\n\nCheck soil moisture, recent rainfall, crop stage, and any pest symptoms first. For Tamil Nadu conditions, choose paddy when water is reliable, millets or pulses when water is limited, and vegetables only when you have steady irrigation.`;
+}
+
+function fallbackSummary(message: string) {
+  return message.length > 120 ? `${message.slice(0, 117)}...` : message;
+}
+
 export async function POST(req: NextRequest) {
   const farmer = getAuthFarmer(req);
   if (!farmer) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -90,27 +106,37 @@ Always provide practical, actionable advice relevant to Tamil Nadu climate and f
       { role: 'user', content: message },
     ];
 
-    const reply = await chatWithBedrock(messages, systemPrompt);
+    let reply: string;
+    try {
+      reply = await chatWithBedrock(messages, systemPrompt);
+    } catch (err) {
+      console.error('AI reply error:', err);
+      reply = fallbackReply(message, locale);
+    }
 
     // Save chat to DynamoDB asynchronously
     const fullConversation = [...messages, { role: 'assistant' as const, content: reply }];
     const conversationText = fullConversation.map(m => `${m.role}: ${m.content}`).join('\n');
+    const chatId = generateId();
 
     Promise.all([
       summarizeText(conversationText),
       extractFarmingContextTags(conversationText),
-    ]).then(([summary, tags]) => {
+    ]).catch((err) => {
+      console.error('Chat metadata error:', err);
+      return [fallbackSummary(message), ['general_advice']] as [string, string[]];
+    }).then(([summary, tags]) => {
       putItem(Tables.CHAT_HISTORY, {
         farmer_id: farmer.farmerId,
         timestamp: new Date().toISOString(),
-        chat_id: generateId(),
+        chat_id: chatId,
         messages: fullConversation,
         summary,
         farming_context_tags: tags,
       }).catch(console.error);
     }).catch(console.error);
 
-    return NextResponse.json({ reply, locale });
+    return NextResponse.json({ reply, locale, chatId });
   } catch (err) {
     if (err instanceof z.ZodError) return NextResponse.json({ error: err.errors }, { status: 400 });
     console.error('Chat error:', err);
