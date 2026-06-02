@@ -3,6 +3,9 @@ import OpenAI from 'openai';
 const apiKey = process.env.OPENAI_API_KEY ?? '';
 const chatModel = process.env.OPENAI_CHAT_MODEL ?? 'gpt-4o';
 const embedModel = process.env.OPENAI_EMBED_MODEL ?? 'text-embedding-3-small';
+const ttsModel = process.env.OPENAI_TTS_MODEL ?? 'gpt-4o-mini-tts';
+const ttsVoice = process.env.OPENAI_TTS_VOICE ?? 'alloy';
+const sttModel = process.env.OPENAI_STT_MODEL ?? 'whisper-1';
 
 const client = new OpenAI({ apiKey });
 
@@ -103,6 +106,32 @@ export async function embedText(text: string): Promise<number[]> {
     input: text,
   });
   return res.data[0].embedding;
+}
+
+/**
+ * Text-to-speech via OpenAI. Multilingual voices speak en/hi/ta correctly
+ * (unlike AWS Polly, which has no Tamil voice). Returns an MP3 buffer.
+ */
+export async function synthesizeSpeech(text: string, _locale: string): Promise<Buffer> {
+  const res = await client.audio.speech.create({
+    model: ttsModel,
+    voice: ttsVoice,
+    input: text,
+  });
+  return Buffer.from(await res.arrayBuffer());
+}
+
+/**
+ * Speech-to-text via OpenAI Whisper. Accepts the browser's WebM/Opus recording
+ * directly. `locale` is an ISO-639-1 hint (en/hi/ta) to improve accuracy.
+ */
+export async function transcribeAudio(file: File, locale: string): Promise<string> {
+  const res = await client.audio.transcriptions.create({
+    file,
+    model: sttModel,
+    language: locale,
+  });
+  return res.text.trim();
 }
 
 /** Embed many texts in one request (used by the ingestion script). */

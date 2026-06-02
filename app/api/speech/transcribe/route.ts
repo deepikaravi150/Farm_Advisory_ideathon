@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { transcribeAudio } from '@/lib/aws/transcribe';
+import { transcribeAudio } from '@/lib/ai/openai';
 import { verifyToken } from '@/lib/auth';
 
 export async function POST(req: NextRequest) {
@@ -15,8 +15,7 @@ export async function POST(req: NextRequest) {
 
     if (!audioFile) return NextResponse.json({ error: 'No audio file provided' }, { status: 400 });
 
-    const buffer = Buffer.from(await audioFile.arrayBuffer());
-    const transcript = await transcribeAudio(buffer, locale);
+    const transcript = await transcribeAudio(audioFile, locale);
 
     return NextResponse.json({ transcript });
   } catch (err) {

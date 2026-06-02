@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { synthesizeSpeech } from '@/lib/aws/polly';
+import { synthesizeSpeech } from '@/lib/ai/openai';
 import { verifyToken } from '@/lib/auth';
 
 const SynthesizeSchema = z.object({
