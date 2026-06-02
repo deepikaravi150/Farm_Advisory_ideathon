@@ -1,0 +1,211 @@
+{
+  "common": {
+    "acres": "acres",
+    "loading": "Loading...",
+    "back": "Back",
+    "next": "Next",
+    "skip": "Skip",
+    "close": "Close",
+    "save": "Save",
+    "edit": "Edit",
+    "networkError": "Network error. Please try again."
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "cropPlan": "Crop Plan",
+    "profile": "Profile",
+    "logout": "Logout"
+  },
+  "landing": {
+    "tagline": "AI-powered crop planning, weather alerts, and personalized farming advice — built for Tamil Nadu farmers.",
+    "login": "Login",
+    "registerFree": "Register Free",
+    "featuresTitle": "Everything a Tamil Nadu farmer needs",
+    "feature1Title": "AI Crop Planning",
+    "feature1Desc": "Get personalized crop recommendations based on your land, soil, and weather.",
+    "feature2Title": "Weather Alerts",
+    "feature2Desc": "SMS alerts when extreme weather threatens your crops — in your language.",
+    "feature3Title": "Full Season Guide",
+    "feature3Desc": "From sowing to selling — a visual plan covering every stage of farming.",
+    "feature4Title": "Voice & Multilingual",
+    "feature4Desc": "Ask questions by voice in Tamil, Hindi, or English — get answers instantly.",
+    "footer": "© 2025 FarmAdvisor · Built for Tamil Nadu Farmers · AI-powered by OpenAI"
+  },
+  "schemes": {
+    "title": "Government Schemes for Farmers",
+    "titleShort": "Government Schemes",
+    "empty": "Schemes will appear here once seeded.",
+    "eligibility": "Eligibility",
+    "deadline": "Deadline"
+  },
+  "login": {
+    "welcome": "Welcome back",
+    "subtitle": "Login to access your farm dashboard",
+    "phone": "Phone Number",
+    "phonePlaceholder": "10-digit mobile number",
+    "password": "Password",
+    "passwordPlaceholder": "Your password",
+    "loginBtn": "Login",
+    "loggingIn": "Logging in...",
+    "failed": "Login failed",
+    "newFarmer": "New farmer?",
+    "registerHere": "Register here"
+  },
+  "register": {
+    "title": "FarmAdvisor — Register",
+    "stepDetails": "Details",
+    "stepLandMap": "Land Map",
+    "stepPassword": "Password",
+    "farmerId": "Government Farmer ID",
+    "farmerIdPlaceholder": "e.g. TN-1234567",
+    "name": "Full Name",
+    "namePlaceholder": "Your full name",
+    "phone": "Phone Number",
+    "phonePlaceholder": "10-digit mobile number",
+    "address": "Farm Address",
+    "addressPlaceholder": "e.g. Thiruvannamalai, Tamil Nadu",
+    "addressNote": "We'll use this to locate your farm on the map in the next step.",
+    "landType": "Land Type (optional)",
+    "landTypePlaceholder": "e.g. Clay, Red Soil, Wetland",
+    "landArea": "Land Area (acres)",
+    "landAreaPlaceholder": "e.g. 2.5",
+    "nextDrawBoundary": "Next: Draw Land Boundary →",
+    "nextSetPassword": "Next: Set Password →",
+    "createPassword": "Create Password",
+    "createPasswordPlaceholder": "Min 8 characters",
+    "confirmPassword": "Confirm Password",
+    "confirmPasswordPlaceholder": "Repeat password",
+    "createAccount": "Create Account",
+    "creating": "Creating...",
+    "alreadyRegistered": "Already registered?",
+    "loginLink": "Login",
+    "errFarmerId": "Farmer ID is required",
+    "errName": "Full name required",
+    "errPhone": "Enter 10-digit phone number",
+    "errAddress": "Enter your village / town address",
+    "errLandArea": "Enter valid land area",
+    "errPasswordsNoMatch": "Passwords do not match",
+    "errPasswordShort": "Password must be at least 8 characters",
+    "failed": "Registration failed"
+  },
+  "map": {
+    "instruction": "Mark your land boundary on the map",
+    "clear": "Clear",
+    "searchPlaceholder": "Search your village, town or district...",
+    "find": "Find",
+    "drawBoundary": "Draw Land Boundary",
+    "drawingHint": "Click to add points · Double-click or press Done to finish",
+    "done": "Done ({count} pts)",
+    "pointsSaved": "{count} boundary points saved",
+    "redraw": "Redraw",
+    "firstSearchHint": "First search your location above to zoom in, then click \"Draw Land Boundary\""
+  },
+  "dashboard": {
+    "greeting": "Good day, {name}!"
+  },
+  "weather": {
+    "humidity": "Humidity",
+    "wind": "Wind",
+    "feels": "Feels {temp}°C",
+    "forecast": "16-Day Forecast",
+    "unavailable": "Weather unavailable"
+  },
+  "land": {
+    "yourLand": "Your Land",
+    "noCoords": "No land coordinates recorded"
+  },
+  "recentChats": {
+    "title": "Recent Chats",
+    "empty": "No conversations yet. Start chatting!"
+  },
+  "chat": {
+    "title": "Farm Advisor Chat",
+    "placeholder": "Ask about your crops...",
+    "emptyHint": "Ask me anything about farming, crops, weather, or market prices.",
+    "thinking": "Thinking...",
+    "listen": "Listen",
+    "error": "Sorry, something went wrong. Please try again."
+  },
+  "voice": {
+    "startInput": "Start voice input",
+    "stopRecording": "Stop recording",
+    "micDenied": "Microphone access denied."
+  },
+  "cropPlan": {
+    "title": "Crop Plan",
+    "subtitle": "Your AI-generated seasonal farming roadmap",
+    "newPlan": "New Plan",
+    "generatingTitle": "Generating your personalized crop plan...",
+    "generatingSubtitle": "Analyzing your land, soil data, and seasonal conditions",
+    "storageNotesTitle": "Storage & Selling Notes"
+  },
+  "suggestions": {
+    "title": "Recommended Crops for Your Land",
+    "season": "Season",
+    "revenueEst": "Revenue est.",
+    "budget": "Budget",
+    "selectThis": "Select This Crop"
+  },
+  "planChart": {
+    "totalBudget": "Total Budget",
+    "harvest": "Harvest",
+    "sellWindow": "Sell window",
+    "days": "days",
+    "tasks": "Tasks",
+    "estimatedCost": "Estimated Cost",
+    "close": "Close"
+  },
+  "assessment": {
+    "title": "Let's build your crop plan",
+    "subtitleState": "Tell me about your current farming situation.",
+    "subtitleQuestions": "A few quick questions so your plan is tailored to your land.",
+    "optUnsureLabel": "I'm planning — not sure what to grow",
+    "optUnsureDesc": "Get AI crop suggestions for your land",
+    "optSpecificLabel": "I have a crop in mind",
+    "optSpecificDesc": "Validate and get a detailed plan",
+    "optMidLabel": "I'm currently growing a crop",
+    "optMidDesc": "Track progress and get remaining guidance",
+    "questionOf": "Question {current} of {total}",
+    "experience": { "q": "How long have you been farming?", "opts": ["New to farming", "Less than 3 years", "3–10 years", "More than 10 years"] },
+    "grownBefore": { "q": "Have you grown any crop on this land before?", "opts": ["Yes", "No"] },
+    "previousCrops": { "q": "Which crop(s) did you grow on this land most recently?", "ph": "e.g. Paddy, then groundnut" },
+    "lastGrownWhen": { "q": "When did you last grow it?", "ph": "e.g. Last Kuruvai / Kharif 2024" },
+    "lastHarvest": { "q": "How was that harvest?", "opts": ["Good", "Average", "Poor"] },
+    "pastIssues": { "q": "Did you face any problems? (pests, disease, water, soil…)", "ph": "e.g. Stem borer attack, low rainfall" },
+    "irrigation": { "q": "What is your main source of irrigation?", "opts": ["Rain-fed only", "Borewell", "Canal", "Open well / pond", "Drip / sprinkler"] },
+    "fertilizers": { "q": "Which fertilizers do you usually use?", "opts": ["None", "Chemical", "Organic", "Both chemical & organic"] },
+    "finalCropLabel": "Which crop are you planning to grow?",
+    "finalCropPlaceholder": "e.g. Paddy, Tomato, Sugarcane...",
+    "finalMidLabel": "Tell me about your current crop",
+    "finalMidPlaceholder": "e.g. Growing paddy, sowed 3 weeks ago, looks healthy...",
+    "finalUnsureMsg": "Thanks! I'll use your answers to suggest the best crops for your land.",
+    "getSuggestions": "Get Crop Suggestions",
+    "assessCrop": "Assess My Crop",
+    "generatePlan": "Generate Plan"
+  },
+  "profile": {
+    "title": "My Profile",
+    "soilReportTitle": "Soil Test Report",
+    "soilReportSubtitle": "Upload your lab soil test report. AI will extract nutrient data automatically.",
+    "farmerId": "Farmer ID",
+    "phone": "Phone",
+    "landArea": "Land Area",
+    "landType": "Land Type",
+    "language": "Language",
+    "english": "English",
+    "hindi": "हिन्दी",
+    "tamil": "தமிழ்"
+  },
+  "soil": {
+    "analyzing": "Analyzing soil report with AI...",
+    "dropHere": "Drop soil report here",
+    "browseHint": "or click to browse (JPEG, PNG, PDF — max 10MB)",
+    "extracted": "Soil Report Extracted",
+    "ph": "pH",
+    "nitrogen": "Nitrogen",
+    "phosphorus": "Phosphorus",
+    "potassium": "Potassium",
+    "recommendations": "AI Recommendations",
+    "uploadFailed": "Upload failed. Please try again."
+  }
+}
