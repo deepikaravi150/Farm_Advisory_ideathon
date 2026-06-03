@@ -7,6 +7,9 @@ node_modules/
 .next/
 out/
 
+# claude folder
+.claude
+
 # env files
 .env
 .env.local
