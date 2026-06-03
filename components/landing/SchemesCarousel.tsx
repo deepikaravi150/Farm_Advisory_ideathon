@@ -1,90 +1,122 @@
 'use client';
-import { useEffect, useState } from 'react';
-import { useTranslations } from 'next-intl';
-import { ExternalLink, ChevronLeft, ChevronRight, IndianRupee } from 'lucide-react';
+
+import { useEffect, useMemo, useState } from 'react';
+import { ExternalLink, IndianRupee } from 'lucide-react';
 
 interface Scheme {
-  scheme_id: string;
-  name: string;
-  description_en: string;
-  eligibility: string;
-  deadline: string;
+  scheme_id?: string;
+  name?: string;
+  Scheme_Name?: string;
+  description_en?: string;
+  eligibility?: string;
+  deadline?: string;
   apply_url?: string;
 }
 
+const AGRISNET_SCHEMES_URL = 'https://www.tnagrisnet.tn.gov.in/home/schemes/';
+
+const fallbackSchemes: Scheme[] = [
+  {
+    scheme_id: 'uatt',
+    name: 'Uzhavar Aluvalar Thodarbu Thittam (UATT)',
+    description_en: 'Farmer-officer contact support listed by Tamil Nadu Agrisnet.',
+    apply_url: AGRISNET_SCHEMES_URL,
+  },
+  {
+    scheme_id: 'collective-farming',
+    name: 'Collective Farming',
+    description_en: 'Tamil Nadu farmer group support initiative listed by Agrisnet.',
+    apply_url: AGRISNET_SCHEMES_URL,
+  },
+  {
+    scheme_id: 'tnmsdd',
+    name: 'TamilNadu Mission for Sustainable Dry Land Developement (TNMSDD)',
+    description_en: 'Dry land development mission listed by Tamil Nadu Agrisnet.',
+    apply_url: AGRISNET_SCHEMES_URL,
+  },
+];
+
+function getSchemeName(scheme: Scheme) {
+  return scheme.name || scheme.Scheme_Name || 'Government Scheme';
+}
+
 export default function SchemesCarousel() {
-  const [schemes, setSchemes] = useState<Scheme[]>([]);
-  const [idx, setIdx] = useState(0);
+  const [schemes, setSchemes] = useState<Scheme[]>(fallbackSchemes);
   const [loading, setLoading] = useState(true);
-  const t = useTranslations('schemes');
 
   useEffect(() => {
-    fetch('/api/schemes').then(r => r.json()).then(data => {
-      setSchemes(Array.isArray(data) ? data : []);
-      setLoading(false);
-    }).catch(() => setLoading(false));
+    fetch('/api/schemes')
+      .then(r => (r.ok ? r.json() : []))
+      .then(data => {
+        if (Array.isArray(data) && data.length) {
+          setSchemes(data);
+        }
+      })
+      .catch(() => {
+        setSchemes(fallbackSchemes);
+      })
+      .finally(() => setLoading(false));
   }, []);
 
-  if (loading) return (
-    <section className="py-12 px-4 bg-earth-50">
-      <div className="max-w-4xl mx-auto">
-        <h2 className="text-2xl font-bold text-earth-800 mb-6 text-center">{t('titleShort')}</h2>
-        <div className="animate-pulse bg-white rounded-2xl h-48" />
-      </div>
-    </section>
-  );
-
-  if (!schemes.length) return (
-    <section className="py-12 px-4 bg-earth-50">
-      <div className="max-w-4xl mx-auto text-center">
-        <h2 className="text-2xl font-bold text-earth-800 mb-4">{t('titleShort')}</h2>
-        <p className="text-gray-500">{t('empty')}</p>
-      </div>
-    </section>
-  );
-
-  const scheme = schemes[idx];
+  const marqueeSchemes = useMemo(() => [...schemes, ...schemes], [schemes]);
 
   return (
-    <section className="py-12 px-4 bg-earth-50">
-      <div className="max-w-4xl mx-auto">
-        <h2 className="text-2xl font-bold text-earth-800 mb-6 text-center flex items-center justify-center gap-2">
-          <IndianRupee className="w-6 h-6 text-earth-600" /> {t('title')}
-        </h2>
-        <div className="relative bg-white rounded-2xl shadow-md p-6 border border-earth-200">
-          <div className="mb-2 flex items-start justify-between gap-4">
-            <h3 className="text-xl font-semibold text-brand-700">{scheme.name}</h3>
-            {scheme.apply_url && (
-              <a href={scheme.apply_url} target="_blank" rel="noopener noreferrer"
-                className="text-brand-600 hover:text-brand-800 flex-shrink-0">
-                <ExternalLink className="w-5 h-5" />
-              </a>
-            )}
+    <section className="py-12 bg-earth-50 overflow-hidden">
+      <div className="max-w-6xl mx-auto px-4">
+        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-6">
+          <div>
+            <h2 className="text-2xl font-bold text-earth-800 flex items-center gap-2">
+              <IndianRupee className="w-6 h-6 text-earth-600" />
+              Government Schemes for Farmers
+            </h2>
+            <p className="text-sm text-gray-500 mt-1">
+              Tamil Nadu Agrisnet scheme highlights before login
+            </p>
           </div>
-          <p className="text-gray-600 mb-3">{scheme.description_en}</p>
-          <div className="flex flex-wrap gap-4 text-sm">
-            <span className="bg-brand-100 text-brand-700 px-3 py-1 rounded-full">
-              {t('eligibility')}: {scheme.eligibility}
-            </span>
-            {scheme.deadline && (
-              <span className="bg-earth-100 text-earth-700 px-3 py-1 rounded-full">
-                {t('deadline')}: {scheme.deadline}
+          <a
+            href={AGRISNET_SCHEMES_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 text-sm font-semibold text-brand-700 hover:text-brand-900"
+          >
+            View official schemes
+            <ExternalLink className="w-4 h-4" />
+          </a>
+        </div>
+      </div>
+
+      <div className="relative border-y border-earth-200 bg-white">
+        <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-20 bg-gradient-to-r from-white to-transparent" />
+        <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-20 bg-gradient-to-l from-white to-transparent" />
+        <div
+          className={`flex w-max gap-4 py-5 marquee-track ${loading ? 'opacity-70' : ''}`}
+          aria-label="Government schemes marquee"
+        >
+          {marqueeSchemes.map((scheme, index) => (
+            <a
+              key={`${scheme.scheme_id || getSchemeName(scheme)}-${index}`}
+              href={scheme.apply_url || AGRISNET_SCHEMES_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="group flex w-[280px] sm:w-[340px] shrink-0 flex-col justify-between rounded-lg border border-brand-100 bg-brand-50 px-5 py-4 transition-colors hover:border-brand-300 hover:bg-white"
+            >
+              <span className="text-base font-semibold text-brand-800 line-clamp-2">
+                {getSchemeName(scheme)}
               </span>
-            )}
-          </div>
-          <div className="flex items-center justify-between mt-4">
-            <button onClick={() => setIdx(Math.max(0, idx - 1))} disabled={idx === 0}
-              className="p-2 rounded-full hover:bg-gray-100 disabled:opacity-30">
-              <ChevronLeft className="w-5 h-5" />
-            </button>
-            <span className="text-sm text-gray-400">{idx + 1} / {schemes.length}</span>
-            <button onClick={() => setIdx(Math.min(schemes.length - 1, idx + 1))} disabled={idx === schemes.length - 1}
-              className="p-2 rounded-full hover:bg-gray-100 disabled:opacity-30">
-              <ChevronRight className="w-5 h-5" />
-            </button>
-          </div>
+              {scheme.description_en && (
+                <span className="mt-2 text-sm text-gray-600 line-clamp-2">
+                  {scheme.description_en}
+                </span>
+              )}
+              <span className="mt-4 inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-earth-700">
+                Check details
+                <ExternalLink className="w-3.5 h-3.5" />
+              </span>
+            </a>
+          ))}
         </div>
       </div>
     </section>
   );
 }
+ 

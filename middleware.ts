@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyToken } from '@/lib/auth';
 
 const PUBLIC_PATHS = ['/', '/login', '/register', '/api/auth', '/api/schemes', '/api/health', '/_next', '/favicon'];
 
@@ -9,9 +8,8 @@ export function middleware(req: NextRequest) {
   if (isPublic) return NextResponse.next();
 
   const token = req.cookies.get('auth_token')?.value;
-  const farmer = token ? verifyToken(token) : null;
 
-  if (!farmer) {
+  if (!token) {
     const loginUrl = new URL('/login', req.url);
     loginUrl.searchParams.set('from', pathname);
     return NextResponse.redirect(loginUrl);

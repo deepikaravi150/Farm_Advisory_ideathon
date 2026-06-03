@@ -2,7 +2,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { Send, Bot, User, Loader2 } from 'lucide-react';
+import { Send, Bot, User, Loader2, Plus } from 'lucide-react';
 import VoiceInput from './VoiceInput';
 import VoiceOutput from './VoiceOutput';
 import Cookies from 'js-cookie';
@@ -54,6 +54,12 @@ export default function ChatPanel() {
     router.refresh();
   }
 
+  function startNewChat() {
+    setMessages([]);
+    setInput('');
+    setLastReply('');
+  }
+
   return (
     <div className="flex flex-col h-full bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
       <div className="bg-brand-700 text-white p-4 flex items-center justify-between flex-shrink-0">
@@ -100,6 +106,14 @@ export default function ChatPanel() {
 
       <div className="p-3 border-t border-gray-100 flex-shrink-0">
         <div className="flex gap-2 items-end">
+          <button
+            type="button"
+            onClick={startNewChat}
+            title="New chat"
+            className="bg-brand-600 text-white rounded-xl p-2.5 hover:bg-brand-700 transition-colors flex-shrink-0"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
           <textarea ref={textareaRef} value={input} onChange={e => setInput(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
             placeholder={t('placeholder')} rows={2}

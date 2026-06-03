@@ -1,7 +1,7 @@
 'use client';
 import { useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Loader2, Sprout, Leaf, Tractor, ChevronLeft } from 'lucide-react';
+import { Loader2, Sprout, Leaf, Tractor, ChevronLeft, X } from 'lucide-react';
 
 type FarmerState = 'planning_unsure' | 'planning_specific' | 'mid_grow';
 
@@ -15,11 +15,12 @@ export interface AssessmentPayload {
 interface Props {
   onSubmit: (state: FarmerState, payload: AssessmentPayload) => void;
   loading: boolean;
+  onClose?: () => void;
 }
 
 interface Question {
   key: string;
-  type: 'single' | 'text';
+  type: 'single' | 'text' | 'crop';
   // Stable English option values — used for the dynamic `showIf` logic and sent
   // to the LLM, while the displayed labels come from translations (same order).
   values?: string[];
@@ -30,6 +31,7 @@ interface Question {
 // `showIf` makes the series dynamic: a farmer who has never grown anything on
 // this land never sees the previous-crop questions.
 const QUESTIONS: Question[] = [
+  { key: 'cropName', type: 'crop' },
   { key: 'experience', type: 'single', values: ['New to farming', 'Less than 3 years', '3–10 years', 'More than 10 years'] },
   { key: 'grownBefore', type: 'single', values: ['Yes', 'No'] },
   { key: 'previousCrops', type: 'text', showIf: a => a.grownBefore === 'Yes' },
@@ -40,7 +42,24 @@ const QUESTIONS: Question[] = [
   { key: 'fertilizers', type: 'single', values: ['None', 'Chemical', 'Organic', 'Both chemical & organic'] },
 ];
 
-export default function StateAssessmentModal({ onSubmit, loading }: Props) {
+const CROP_OPTIONS = [
+  'Paddy',
+  'Groundnut',
+  'Maize',
+  'Sugarcane',
+  'Cotton',
+  'Tomato',
+  'Brinjal',
+  'Chilli',
+  'Banana',
+  'Turmeric',
+  'Black gram',
+  'Green gram',
+  'Sesame',
+  'Millets',
+];
+
+export default function StateAssessmentModal({ onSubmit, loading, onClose }: Props) {
   const t = useTranslations('assessment');
   const tc = useTranslations('common');
   const [phase, setPhase] = useState<'state' | 'questions' | 'final'>('state');
@@ -61,11 +80,13 @@ export default function StateAssessmentModal({ onSubmit, loading }: Props) {
   function chooseState(s: FarmerState) {
     setState(s);
     setAnswers({});
+    setCropName('');
     setIdx(0);
     setPhase('questions');
   }
 
   function setAnswer(key: string, value: string) {
+    if (key === 'cropName') setCropName(value);
     setAnswers(prev => ({ ...prev, [key]: value }));
   }
 
@@ -91,16 +112,27 @@ export default function StateAssessmentModal({ onSubmit, loading }: Props) {
   function submitFinal() {
     const assessment = buildAssessment();
     if (state === 'planning_specific') onSubmit(state, { cropName, startDate, assessment });
-    else if (state === 'mid_grow') onSubmit(state, { info, assessment });
-    else onSubmit(state, { startDate, assessment });
+    else if (state === 'mid_grow') onSubmit(state, { cropName, info, assessment });
+    else onSubmit(state, { cropName, startDate, assessment });
   }
 
   const total = visible.length;
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
-        <h2 className="text-xl font-bold text-gray-800 mb-2">{t('title')}</h2>
+      <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 relative">
+        {onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={loading}
+            title={tc('close')}
+            className="absolute right-4 top-4 text-gray-400 hover:text-gray-700 disabled:opacity-40"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        )}
+        <h2 className="text-xl font-bold text-gray-800 mb-2 pr-8">{t('title')}</h2>
         <p className="text-gray-500 text-sm mb-6">
           {phase === 'state' ? t('subtitleState') : t('subtitleQuestions')}
         </p>
@@ -139,7 +171,9 @@ export default function StateAssessmentModal({ onSubmit, loading }: Props) {
               <div className="h-full bg-brand-500 transition-all" style={{ width: `${((idx + 1) / total) * 100}%` }} />
             </div>
 
-            <p className="font-medium text-gray-800">{t(`${current.key}.q`)}</p>
+            <p className="font-medium text-gray-800">
+              {current.type === 'crop' ? t('finalCropLabel') : t(`${current.key}.q`)}
+            </p>
 
             {current.type === 'single' && (
               <div className="space-y-2">
@@ -157,6 +191,27 @@ export default function StateAssessmentModal({ onSubmit, loading }: Props) {
                     </button>
                   );
                 })}
+              </div>
+            )}
+
+            {current.type === 'crop' && (
+              <div className="space-y-3">
+                <select
+                  autoFocus
+                  value={cropName}
+                  onChange={e => setAnswer(current.key, e.target.value)}
+                  className="w-full border border-gray-300 rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-400 bg-white"
+                >
+                  <option value="">{t('finalCropPlaceholder')}</option>
+                  {CROP_OPTIONS.map(crop => (
+                    <option key={crop} value={crop}>{crop}</option>
+                  ))}
+                </select>
+                <button onClick={advance}
+                  disabled={!cropName.trim()}
+                  className="w-full bg-brand-600 text-white py-2.5 rounded-xl hover:bg-brand-700 disabled:opacity-40">
+                  {tc('next')}
+                </button>
               </div>
             )}
 
@@ -188,15 +243,6 @@ export default function StateAssessmentModal({ onSubmit, loading }: Props) {
               <ChevronLeft className="w-3.5 h-3.5" /> {tc('back')}
             </button>
 
-            {state === 'planning_specific' && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">{t('finalCropLabel')}</label>
-                <input value={cropName} onChange={e => setCropName(e.target.value)}
-                  className="w-full border border-gray-300 rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-400"
-                  placeholder={t('finalCropPlaceholder')} />
-              </div>
-            )}
-
             {state === 'mid_grow' && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">{t('finalMidLabel')}</label>
@@ -226,14 +272,12 @@ export default function StateAssessmentModal({ onSubmit, loading }: Props) {
             <button onClick={submitFinal}
               disabled={
                 loading ||
-                (state === 'planning_specific' && !cropName.trim()) ||
+                !cropName.trim() ||
                 (state === 'mid_grow' && !info.trim())
               }
               className="w-full bg-brand-600 text-white py-3 rounded-xl hover:bg-brand-700 disabled:opacity-40 flex items-center justify-center gap-2">
               {loading && <Loader2 className="w-4 h-4 animate-spin" />}
-              {state === 'planning_unsure' ? t('getSuggestions')
-                : state === 'mid_grow' ? t('assessCrop')
-                : t('generatePlan')}
+              Save New Plan
             </button>
           </div>
         )}

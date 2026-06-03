@@ -3,6 +3,14 @@ import { z } from 'zod';
 import { putItem, getItem, Tables } from '@/lib/aws/dynamodb';
 import { hashPassword } from '@/lib/auth';
 import { generateId } from '@/lib/utils';
+import { findFarmersByPhone } from '@/app/api/auth/farmers';
+
+function requireAwsEnv() {
+  const missing = ['AWS_REGION', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY'].filter(key => !process.env[key]);
+  if (missing.length) {
+    throw new Error(`Missing environment variables: ${missing.join(', ')}. Create .env.local with the required AWS credentials.`);
+  }
+}
 
 const RegisterSchema = z.object({
   farmerId: z.string().min(1, 'Farmer ID is required'),
@@ -18,6 +26,7 @@ const RegisterSchema = z.object({
 
 export async function POST(req: NextRequest) {
   try {
+    requireAwsEnv();
     const body = await req.json();
     const data = RegisterSchema.parse(body);
 
@@ -25,6 +34,11 @@ export async function POST(req: NextRequest) {
     const existing = await getItem(Tables.FARMER_PROFILES, { farmer_id: data.farmerId });
     if (existing) {
       return NextResponse.json({ error: 'Farmer ID already registered' }, { status: 409 });
+    }
+
+    const existingPhone = await findFarmersByPhone(data.phone);
+    if (existingPhone.length) {
+      return NextResponse.json({ error: 'Phone number already registered' }, { status: 409 });
     }
 
     const passwordHash = await hashPassword(data.password);

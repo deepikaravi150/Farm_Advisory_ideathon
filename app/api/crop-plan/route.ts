@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { verifyToken } from '@/lib/auth';
 import { chatWithBedrock } from '@/lib/ai/openai';
-import { queryItems, putItem, getItem, Tables } from '@/lib/aws/dynamodb';
+import { queryItems, putItem, getItem, deleteItem, Tables } from '@/lib/aws/dynamodb';
 import { generateId, extractCentroid } from '@/lib/utils';
 import { get15DayForecast, type ForecastDay } from '@/lib/weather';
 import { annotateMilestonesWithWeather, forecastSummaryForPrompt } from '@/lib/crop-plan-weather';
@@ -34,14 +34,33 @@ export async function GET(req: NextRequest) {
     KeyConditionExpression: 'farmer_id = :fid',
     ExpressionAttributeValues: { ':fid': farmer.farmerId },
     ScanIndexForward: false,
-    Limit: 5,
+    Limit: 20,
   });
 
   return NextResponse.json(plans);
 }
 
+export async function DELETE(req: NextRequest) {
+  const farmer = getAuthFarmer(req);
+  if (!farmer) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const planId = req.nextUrl.searchParams.get('planId');
+  if (!planId) return NextResponse.json({ error: 'Plan ID is required' }, { status: 400 });
+
+  try {
+    await deleteItem(Tables.CROP_PLANS, {
+      farmer_id: farmer.farmerId,
+      plan_id: planId,
+    });
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    console.error('Crop plan delete error:', err);
+    return NextResponse.json({ error: 'Plan delete failed' }, { status: 500 });
+  }
+}
+
 const GeneratePlanSchema = z.object({
-  cropName: z.string().optional(),
+  cropName: z.string().min(1),
   farmerState: z.enum(['planning_unsure', 'planning_specific', 'mid_grow']),
   currentCropInfo: z.string().optional(),
   assessment: z.record(z.string()).optional(),
@@ -73,16 +92,21 @@ function formatAssessment(a?: Record<string, string>): string {
 }
 
 // Normalize the various LLM JSON shapes into the CropPlan the UI expects.
-function normalizePlan(p: Record<string, unknown> | undefined | null, startDate: string): NormalizedPlan | null {
-  if (!p || !p.cropName) return null;
+function normalizePlan(
+  p: Record<string, unknown> | undefined | null,
+  startDate: string,
+  fallbackCropName?: string
+): NormalizedPlan | null {
+  const cropName = p?.cropName ?? p?.crop_name ?? fallbackCropName;
+  if (!p || !cropName) return null;
   return {
-    cropName: String(p.cropName),
-    startDate: String(p.startDate ?? startDate),
+    cropName: String(cropName),
+    startDate: String(p.startDate ?? p.start_date ?? startDate),
     milestones: (p.milestones ?? p.remainingMilestones ?? []) as Milestone[],
-    totalBudgetEstimate: Number(p.totalBudgetEstimate ?? 0),
-    harvestDate: String(p.harvestDate ?? ''),
-    sellWindow: String(p.sellWindow ?? ''),
-    storageNotes: String(p.storageNotes ?? ''),
+    totalBudgetEstimate: Number(p.totalBudgetEstimate ?? p.budgetEstimate ?? p.budget_estimate ?? 0),
+    harvestDate: String(p.harvestDate ?? p.harvest_date ?? ''),
+    sellWindow: String(p.sellWindow ?? p.sell_window ?? ''),
+    storageNotes: String(p.storageNotes ?? p.storage_notes ?? ''),
   };
 }
 
@@ -96,14 +120,63 @@ interface NormalizedPlan {
   storageNotes: string;
 }
 
+function addDays(date: string, days: number) {
+  const d = new Date(`${date}T00:00:00`);
+  d.setDate(d.getDate() + days);
+  return d.toISOString().split('T')[0];
+}
+
+function buildFallbackPlan(
+  cropName: string,
+  startDate: string,
+  profile: Record<string, unknown> | null,
+  soilData: Record<string, unknown> | undefined
+): NormalizedPlan {
+  const acres = Number(profile?.land_area_acres ?? 1) || 1;
+  const crop = cropName.trim();
+  const soilNote = soilData
+    ? `Current soil report: pH ${soilData.ph ?? 'unknown'}, N ${soilData.nitrogen ?? 'unknown'}, P ${soilData.phosphorus ?? 'unknown'}, K ${soilData.potassium ?? 'unknown'}.`
+    : 'No soil report is available, so confirm nutrient dose locally before applying fertilizer.';
+  const stages = [
+    { label: 'Land Preparation', offset: 0, days: 7, cost: 12000, task: `Clear weeds, plough the field, break clods, and level the land for ${crop}. Add well-decomposed farmyard manure and improve drainage based on the field slope. ${soilNote}` },
+    { label: 'Seed Selection and Treatment', offset: 7, days: 2, cost: 3500, task: `Buy healthy ${crop} seed from a reliable source. Treat seed with recommended biofertilizer or fungicide before sowing, and keep enough seed for gap filling.` },
+    { label: 'Sowing', offset: 9, days: 3, cost: 9000, task: `Sow ${crop} at the right spacing for your local variety. Keep soil moist during germination, avoid sowing before heavy rain, and mark rows clearly for easy weeding.` },
+    { label: 'Irrigation and Weed Control', offset: 12, days: 21, cost: 8500, task: `Maintain light, regular irrigation according to soil moisture. Remove weeds early, especially during the first three weeks, so ${crop} does not compete for nutrients.` },
+    { label: 'Nutrient and Pest Management', offset: 33, days: 28, cost: 14500, task: `Apply nutrients in split doses based on the soil report and crop growth. Inspect leaves, stems, and flowers twice a week, and use biological or recommended chemical control only when symptoms are seen.` },
+    { label: 'Harvesting and Selling', offset: 61, days: 14, cost: 10000, task: `Harvest ${crop} when the crop reaches maturity and moisture is suitable. Dry, grade, and store the produce cleanly before selling during the best local market window.` },
+  ];
+
+  const milestones = stages.map((stage, index) => ({
+    id: String(index + 1),
+    label: stage.label,
+    date: addDays(startDate, stage.offset),
+    endDate: addDays(startDate, stage.offset + stage.days),
+    durationDays: stage.days,
+    tasks: stage.task,
+    estimatedCost: Math.round(stage.cost * acres),
+    weatherRequirement: 'Avoid heavy rain, waterlogging, and strong wind during field operations. Prefer mild weather with workable soil moisture.',
+  }));
+
+  return {
+    cropName: crop,
+    startDate,
+    milestones,
+    totalBudgetEstimate: milestones.reduce((sum, stage) => sum + stage.estimatedCost, 0),
+    harvestDate: addDays(startDate, 75),
+    sellWindow: `${addDays(startDate, 76)} to ${addDays(startDate, 90)}`,
+    storageNotes: `Store ${crop} in clean, dry bags or containers after proper drying. Keep produce away from moisture and pests.`,
+  };
+}
+
 async function persistPlan(
   farmerId: string,
   plan: NormalizedPlan,
   status: string,
-  currentStage: string | null
+  currentStage: string | null,
+  inputDetails?: Record<string, unknown>
 ) {
   const alertStages = plan.milestones.filter((m) => m.alert).map((m) => m.label);
-  await putItem(Tables.CROP_PLANS, {
+  const item = {
     farmer_id: farmerId,
     plan_id: generateId(),
     crop_name: plan.cropName,
@@ -115,10 +188,13 @@ async function persistPlan(
     budget_estimate: plan.totalBudgetEstimate,
     status,
     current_stage: currentStage,
+    input_details: inputDetails ?? {},
     weather_alerts: alertStages,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
-  });
+  };
+  await putItem(Tables.CROP_PLANS, item);
+  return item;
 }
 
 const SavePlanSchema = z.object({
@@ -132,6 +208,7 @@ const SavePlanSchema = z.object({
     sellWindow: z.string().default(''),
     storageNotes: z.string().default(''),
   }),
+  inputDetails: z.record(z.unknown()).optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -143,15 +220,16 @@ export async function POST(req: NextRequest) {
 
     // Branch: persist a plan the farmer selected from AI suggestions.
     if (body?.action === 'save') {
-      const { plan } = SavePlanSchema.parse(body);
+      const { plan, inputDetails } = SavePlanSchema.parse(body);
       const today = new Date().toISOString().split('T')[0];
-      await persistPlan(
+      const savedPlan = await persistPlan(
         farmer.farmerId,
         { ...plan, startDate: plan.startDate ?? today } as NormalizedPlan,
         'planned',
-        null
+        null,
+        inputDetails
       );
-      return NextResponse.json({ success: true });
+      return NextResponse.json({ success: true, savedPlan });
     }
 
     const data = GeneratePlanSchema.parse(body);
@@ -194,42 +272,20 @@ export async function POST(req: NextRequest) {
          - Produce 6-10 well-sequenced stages from land preparation through to selling.
          - Keep all dates consistent with durationDays and the ${startDate} anchor.`;
 
-    const planPrompt = data.farmerState === 'planning_unsure'
-      ? `Suggest the top 3 best crops to grow for a Tamil Nadu farmer with the following profile:
-         - Land: ${profile?.land_area_acres ?? 'unknown'} acres, ${profile?.typography ?? 'general land'}
-         - Soil: ${soilData ? `pH ${soilData.ph}, N:${soilData.nitrogen} P:${soilData.phosphorus} K:${soilData.potassium}` : 'no soil data'}
-         - Today: ${today}
-         - Farmer wants to start on: ${startDate}${assessmentText}${forecastBlock}
-
-         For each crop, provide a detailed JSON plan:
-         {
-           "suggestedCrops": [
-             {
-               "cropName": "...",
-               "reason": "why it fits this farmer's land/soil/season/experience",
-               "season": "...",
-               "estimatedRevenue": "...",
-               "startDate": "${startDate}",
-               "milestones": [ ...detailed milestones... ],
-               "totalBudgetEstimate": 0,
-               "harvestDate": "YYYY-MM-DD",
-               "sellWindow": "...",
-               "storageNotes": "..."
-             }
-           ]
-         }
-         ${milestoneSpec}
-         Return only valid JSON.`
-      : data.farmerState === 'planning_specific'
+    const planPrompt = data.farmerState === 'planning_unsure' || data.farmerState === 'planning_specific'
       ? `Validate and create a detailed crop plan for growing ${data.cropName} for a Tamil Nadu farmer:
          - Land: ${profile?.land_area_acres ?? 'unknown'} acres
-         - Soil: ${soilData ? `pH ${soilData.ph}, N:${soilData.nitrogen} P:${soilData.phosphorus} K:${soilData.potassium}` : 'no soil data'}
+         - Land type/topography from DB: ${profile?.typography ?? 'general land'}
+         - Farmer address from DB: ${profile?.address ?? 'unknown'}
+         - Soil from DB: ${soilData ? `pH ${soilData.ph}, N:${soilData.nitrogen} P:${soilData.phosphorus} K:${soilData.potassium}` : 'no soil data'}
          - Today: ${today}
          - Farmer wants to start on: ${startDate}${assessmentText}${forecastBlock}
 
-         Assess if ${data.cropName} is suitable, then return JSON:
+         First check whether ${data.cropName} can realistically grow in this farmer's area/land/soil using the DB details above.
+         If suitable, create the plan. If only conditionally suitable, still create the plan but include required adjustments.
+         Return JSON:
          {
-           "suitable": true/false,
+           "suitable": true,
            "suitabilityReason": "...",
            "adjustments": "...",
            "plan": {
@@ -245,13 +301,20 @@ export async function POST(req: NextRequest) {
          ${milestoneSpec}
          Return only valid JSON.`
       : `Assess current growing status for this farmer who is mid-season:
+         - Selected crop: ${data.cropName}
          - Crop info: ${data.currentCropInfo ?? 'unknown'}
          - Land: ${profile?.land_area_acres ?? 'unknown'} acres
+         - Land type/topography from DB: ${profile?.typography ?? 'general land'}
+         - Farmer address from DB: ${profile?.address ?? 'unknown'}
+         - Soil from DB: ${soilData ? `pH ${soilData.ph}, N:${soilData.nitrogen} P:${soilData.phosphorus} K:${soilData.potassium}` : 'no soil data'}
          - Today: ${today}${assessmentText}${forecastBlock}
+
+         First check whether ${data.cropName} can realistically grow in this farmer's area/land/soil using the DB details above.
+         If suitable, create a remaining-stage plan for the selected crop. If conditionally suitable, include corrective adjustments in the tasks.
 
          Return a JSON plan with the REMAINING stages from today onward and current status:
          {
-           "cropName": "...",
+           "cropName": "${data.cropName}",
            "currentStage": "...",
            "startDate": "${today}",
            "remainingMilestones": [ ...detailed milestones, first one starting today... ],
@@ -263,46 +326,65 @@ export async function POST(req: NextRequest) {
          ${milestoneSpec}
          Return only valid JSON.`;
 
-    const llmResponse = await chatWithBedrock(
-      [{ role: 'user', content: planPrompt }],
-      'You are an expert Tamil Nadu agricultural advisor. Return only valid JSON as requested.',
-      // Detailed multi-stage plans are large; JSON mode + a high token cap keep
-      // the response complete and parseable.
-      { json: true, maxTokens: 8000 }
-    );
-
-    // JSON mode returns a clean object; fall back to brace extraction otherwise.
+    let llmResponse = '';
     let planData: Record<string, unknown>;
     try {
-      planData = JSON.parse(llmResponse);
-    } catch {
-      const jsonMatch = llmResponse.match(/\{[\s\S]*\}/);
-      planData = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
+      llmResponse = await chatWithBedrock(
+        [{ role: 'user', content: planPrompt }],
+        'You are an expert Tamil Nadu agricultural advisor. Return only valid JSON as requested.',
+        // Detailed multi-stage plans are large; JSON mode + a high token cap keep
+        // the response complete and parseable.
+        { json: true, maxTokens: 8000 }
+      );
+
+      // JSON mode returns a clean object; fall back to brace extraction otherwise.
+      try {
+        planData = JSON.parse(llmResponse);
+      } catch {
+        const jsonMatch = llmResponse.match(/\{[\s\S]*\}/);
+        planData = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
+      }
+    } catch (err) {
+      console.error('Crop plan AI generation failed, using fallback plan:', err);
+      planData = {
+        suitable: true,
+        suitabilityReason: `${data.cropName} can be planned using the farmer profile and soil details available in the database.`,
+        adjustments: 'Confirm exact seed variety and fertilizer dose with local advisory before field application.',
+        plan: buildFallbackPlan(data.cropName, startDate, profile, soilData),
+      };
     }
 
-    if (data.farmerState === 'planning_unsure') {
-      // Annotate each suggested crop's milestones with the real forecast/alerts.
-      if (Array.isArray(planData.suggestedCrops)) {
-        planData.suggestedCrops = planData.suggestedCrops.map((c: Record<string, unknown>) => ({
-          ...c,
-          startDate: c.startDate ?? startDate,
-          milestones: annotateMilestonesWithWeather((c.milestones ?? []) as Milestone[], forecast),
-        }));
-      }
-    } else {
-      // Normalize the plan (planning_specific nests it under `plan`; mid_grow
-      // returns it at the top level), annotate with weather, then persist it.
-      const normalized = normalizePlan((planData.plan ?? planData) as Record<string, unknown>, startDate);
-      if (normalized) {
-        normalized.milestones = annotateMilestonesWithWeather(normalized.milestones, forecast);
-        planData.plan = normalized;
-        await persistPlan(
-          farmer.farmerId,
-          normalized,
-          data.farmerState === 'mid_grow' ? 'active' : 'planned',
-          (planData.currentStage as string) ?? null
-        );
-      }
+    const suggestedCrops = Array.isArray(planData.suggestedCrops) ? planData.suggestedCrops : [];
+    const matchingSuggestion = suggestedCrops.find((crop) => {
+      if (!crop || typeof crop !== 'object') return false;
+      const candidate = (crop as Record<string, unknown>).cropName ?? (crop as Record<string, unknown>).crop_name;
+      return String(candidate ?? '').toLowerCase() === data.cropName.toLowerCase();
+    }) as Record<string, unknown> | undefined;
+    let rawPlan = (planData.plan ?? matchingSuggestion ?? planData) as Record<string, unknown>;
+    if (!rawPlan.milestones && !rawPlan.remainingMilestones) {
+      rawPlan = buildFallbackPlan(data.cropName, startDate, profile, soilData) as unknown as Record<string, unknown>;
+      planData.plan = rawPlan;
+    }
+    const normalized = normalizePlan(rawPlan, startDate, data.cropName);
+    if (normalized) {
+      normalized.milestones = annotateMilestonesWithWeather(normalized.milestones, forecast);
+      planData.plan = normalized;
+      const inputDetails = {
+        farmerState: data.farmerState,
+        selectedCrop: data.cropName,
+        currentCropInfo: data.currentCropInfo ?? '',
+        assessment: data.assessment ?? {},
+        startDate,
+      };
+      planData.inputDetails = inputDetails;
+      const savedPlan = await persistPlan(
+        farmer.farmerId,
+        normalized,
+        data.farmerState === 'mid_grow' ? 'active' : 'planned',
+        (planData.currentStage as string) ?? null,
+        inputDetails
+      );
+      planData.savedPlan = savedPlan;
     }
 
     return NextResponse.json({ planData, rawResponse: llmResponse });

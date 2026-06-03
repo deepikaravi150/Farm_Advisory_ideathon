@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { queryItems, Tables } from '@/lib/aws/dynamodb';
 import { comparePassword, signToken } from '@/lib/auth';
+import { findFarmersByPhone } from '@/app/api/auth/farmers';
+
+function requireAwsEnv() {
+  const missing = ['AWS_REGION', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY'].filter(key => !process.env[key]);
+  if (missing.length) {
+    throw new Error(`Missing environment variables: ${missing.join(', ')}. Create .env.local with the required AWS credentials.`);
+  }
+}
 
 const LoginSchema = z.object({
   phone: z.string().regex(/^\d{10}$/),
@@ -10,16 +17,12 @@ const LoginSchema = z.object({
 
 export async function POST(req: NextRequest) {
   try {
+    requireAwsEnv();
     const body = await req.json();
     const { phone, password } = LoginSchema.parse(body);
 
-    // Lookup by phone using GSI
-    const results = await queryItems({
-      TableName: Tables.FARMER_PROFILES,
-      IndexName: 'phone-index',
-      KeyConditionExpression: 'phone = :phone',
-      ExpressionAttributeValues: { ':phone': phone },
-    });
+    // Lookup by phone using shared helper that handles missing phone-index gracefully
+    const results = await findFarmersByPhone(phone);
 
     if (!results.length) {
       return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
