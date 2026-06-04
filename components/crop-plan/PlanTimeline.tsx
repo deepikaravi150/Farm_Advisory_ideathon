@@ -1,10 +1,9 @@
 'use client';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import {
   Calendar, IndianRupee, AlertTriangle, CheckCircle2, CircleDot,
   CloudSun, Sprout, Tractor, Wheat, PackageCheck, Droplets, Bug, ShieldCheck,
 } from 'lucide-react';
-import { formatDate } from '@/lib/utils';
 import type { Milestone, CropPlan } from '@/lib/types/crop-plan';
 
 // A vibrant accent palette cycled across stages — keeps the timeline colourful
@@ -65,8 +64,16 @@ interface Props {
 
 export default function PlanTimeline({ plan }: Props) {
   const t = useTranslations('planChart');
-  const milestones = plan.milestones ?? [];
+  const locale = useLocale();
+  const dateLocale = ({ en: 'en-IN', hi: 'hi-IN', ta: 'ta-IN' } as Record<string, string>)[locale] ?? 'en-IN';
+  const displayPlan = plan;
+  const milestones = displayPlan.milestones ?? [];
   const alertCount = milestones.filter((m) => m.alert).length;
+  const formatPlanDate = (date: string) => new Date(`${date}T00:00:00`).toLocaleDateString(dateLocale, {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
 
   return (
     <div>
@@ -75,19 +82,19 @@ export default function PlanTimeline({ plan }: Props) {
         <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
           <div className="flex items-center gap-2">
             <Sprout className="w-6 h-6" />
-            <span className="text-xl font-bold">{plan.cropName}</span>
+            <span className="text-xl font-bold">{displayPlan.cropName}</span>
           </div>
           <div className="flex flex-wrap gap-2 text-sm">
             <span className="bg-white/20 rounded-full px-3 py-1 flex items-center gap-1.5">
               <Calendar className="w-3.5 h-3.5" />
-              {plan.startDate ? formatDate(plan.startDate) : '—'} → {plan.harvestDate ? formatDate(plan.harvestDate) : '—'}
+              {displayPlan.startDate ? formatPlanDate(displayPlan.startDate) : '—'} → {displayPlan.harvestDate ? formatPlanDate(displayPlan.harvestDate) : '—'}
             </span>
             <span className="bg-white/20 rounded-full px-3 py-1 flex items-center gap-1.5">
               <IndianRupee className="w-3.5 h-3.5" />
-              {t('totalBudget')}: ₹{(plan.totalBudgetEstimate ?? 0).toLocaleString('en-IN')}
+              {t('totalBudget')}: ₹{(displayPlan.totalBudgetEstimate ?? 0).toLocaleString('en-IN')}
             </span>
-            {plan.sellWindow && (
-              <span className="bg-white/20 rounded-full px-3 py-1">{t('sellWindow')}: {plan.sellWindow}</span>
+            {displayPlan.sellWindow && (
+              <span className="bg-white/20 rounded-full px-3 py-1">{t('sellWindow')}: {displayPlan.sellWindow}</span>
             )}
             {alertCount > 0 && (
               <span className="bg-red-500 rounded-full px-3 py-1 flex items-center gap-1.5 font-medium">
@@ -126,7 +133,7 @@ export default function PlanTimeline({ plan }: Props) {
                   </div>
                   <span className="text-xs text-gray-600 bg-white rounded-full px-2.5 py-1 flex items-center gap-1 border border-gray-200">
                     <Calendar className="w-3 h-3" />
-                    {formatDate(m.date)}{m.endDate && m.endDate !== m.date ? ` – ${formatDate(m.endDate)}` : ''}
+                    {formatPlanDate(m.date)}{m.endDate && m.endDate !== m.date ? ` – ${formatPlanDate(m.endDate)}` : ''}
                     {m.durationDays ? ` · ${m.durationDays} ${t('days')}` : ''}
                   </span>
                 </div>

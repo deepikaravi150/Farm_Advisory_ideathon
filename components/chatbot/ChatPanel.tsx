@@ -1,7 +1,7 @@
 'use client';
 import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { Send, Bot, User, Loader2, Plus } from 'lucide-react';
 import VoiceInput from './VoiceInput';
 import VoiceOutput from './VoiceOutput';
@@ -12,15 +12,17 @@ interface Message { role: 'user' | 'assistant'; content: string; }
 export default function ChatPanel() {
   const router = useRouter();
   const t = useTranslations('chat');
+  const appLocale = useLocale() as 'en' | 'hi' | 'ta';
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [locale, setLocale] = useState<'en' | 'hi' | 'ta'>(() => (Cookies.get('locale') as 'en' | 'hi' | 'ta') ?? 'en');
+  const [locale, setLocale] = useState<'en' | 'hi' | 'ta'>(appLocale);
   const [lastReply, setLastReply] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+  useEffect(() => { setLocale(appLocale); }, [appLocale]);
 
   async function sendMessage(text?: string) {
     const msg = (text ?? input).trim();

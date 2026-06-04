@@ -1,8 +1,7 @@
 'use client';
 import { useState, useRef, useEffect } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { Send, Bot, User, Loader2, Sparkles, Check, X } from 'lucide-react';
-import Cookies from 'js-cookie';
 import VoiceInput from '@/components/chatbot/VoiceInput';
 import VoiceOutput from '@/components/chatbot/VoiceOutput';
 import type { CropPlan } from '@/lib/types/crop-plan';
@@ -23,7 +22,7 @@ export default function PlanChatPanel({ plan, onApply }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [locale] = useState<'en' | 'hi' | 'ta'>(() => (Cookies.get('locale') as 'en' | 'hi' | 'ta') ?? 'en');
+  const locale = useLocale() as 'en' | 'hi' | 'ta';
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, loading]);

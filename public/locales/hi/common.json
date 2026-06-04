@@ -209,6 +209,7 @@
     "soilReportSubtitle": "अपनी प्रयोगशाला मिट्टी जाँच रिपोर्ट अपलोड करें। एआई स्वतः पोषक तत्व डेटा निकालेगा।",
     "farmerId": "किसान आईडी",
     "phone": "फ़ोन",
+    "address": "खेत का पता",
     "landArea": "भूमि क्षेत्र",
     "landType": "भूमि का प्रकार",
     "language": "भाषा",
@@ -224,8 +225,10 @@
     "ph": "pH",
     "nitrogen": "नाइट्रोजन",
     "phosphorus": "फॉस्फोरस",
-    "potassium": "पोटैशियम",
-    "recommendations": "एआई सिफ़ारिशें",
-    "uploadFailed": "अपलोड विफल। कृपया पुनः प्रयास करें।"
+      "potassium": "पोटैशियम",
+      "recommendations": "एआई सिफ़ारिशें",
+      "whatThisMeans": "इसका मतलब",
+      "keyFindings": "मुख्य बातें",
+      "uploadFailed": "अपलोड विफल। कृपया पुनः प्रयास करें।"
   }
 }

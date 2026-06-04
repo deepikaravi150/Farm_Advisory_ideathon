@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-label="Tamil Nadu Agrisnet scheme icon">
+  <rect width="160" height="160" rx="24" fill="#ecfdf5"/>
+  <path d="M80 25c30 0 55 20 55 45 0 36-55 85-55 85S25 106 25 70c0-25 25-45 55-45z" fill="#059669"/>
+  <circle cx="80" cy="70" r="28" fill="#d1fae5"/>
+  <path d="M80 105V62" stroke="#047857" stroke-width="8" stroke-linecap="round"/>
+  <path d="M80 75c-20-1-29-12-31-30 20 1 30 12 31 30zM82 82c20-1 29-12 31-30-20 1-30 12-31 30z" fill="#10b981"/>
+</svg>

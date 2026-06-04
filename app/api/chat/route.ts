@@ -12,6 +12,31 @@ function getAuthFarmer(req: NextRequest) {
   return token ? verifyToken(token) : null;
 }
 
+function formatSoilReportContext(soilData: Record<string, unknown> | undefined) {
+  if (!soilData) return 'No soil report available.';
+
+  const micronutrients = soilData.micronutrients && typeof soilData.micronutrients === 'object'
+    ? Object.entries(soilData.micronutrients as Record<string, unknown>)
+        .map(([name, value]) => `${name}: ${value ?? 'unknown'}`)
+        .join(', ')
+    : '';
+  const keyFindings = Array.isArray(soilData.key_findings)
+    ? soilData.key_findings.filter(Boolean).join('; ')
+    : '';
+
+  return [
+    'Soil Report (latest):',
+    `- pH: ${soilData.ph ?? 'unknown'}`,
+    `- EC/salinity: ${soilData.electrical_conductivity ?? 'unknown'}`,
+    `- Organic carbon: ${soilData.organic_carbon ?? 'unknown'}`,
+    `- Nitrogen: ${soilData.nitrogen ?? 'unknown'}, Phosphorus: ${soilData.phosphorus ?? 'unknown'}, Potassium: ${soilData.potassium ?? 'unknown'}`,
+    micronutrients ? `- Micronutrients: ${micronutrients}` : '',
+    soilData.plain_language_summary ? `- Farmer-friendly summary: ${soilData.plain_language_summary}` : '',
+    keyFindings ? `- Key findings: ${keyFindings}` : '',
+    soilData.recommendations ? `- Recommendations: ${soilData.recommendations}` : '',
+  ].filter(Boolean).join('\n');
+}
+
 const ChatSchema = z.object({
   message: z.string().min(1),
   locale: z.enum(['en', 'hi', 'ta']).default('en'),
@@ -88,7 +113,12 @@ ${next5}`;
       console.error('Weather context fetch failed:', e);
     }
 
-    const systemPrompt = `You are an expert agricultural advisor specializing in Tamil Nadu farming. You help farmers with crop selection, planting schedules, pest control, fertilizer use, irrigation, harvest timing, storage, and selling guidance.
+    const systemPrompt = `You are FarmAdvisor, a practical Tamil Nadu agricultural advisor for farmers.
+
+Goal:
+- Give fast, clear, field-ready advice for crop choice, planting, pest/disease control, fertilizer, irrigation, harvest, storage, and selling.
+- Personalize advice using the farmer profile, soil report, crop plan, weather, recent chats, and knowledge base below.
+- If a critical detail is missing, ask exactly one short follow-up question; otherwise give the best safe recommendation.
 
 Farmer Profile:
 - Name: ${profile?.name ?? farmer.name}
@@ -96,9 +126,7 @@ Farmer Profile:
 - Land type: ${profile?.typography ?? 'unknown'}
 - Region: Tamil Nadu, India
 
-${soilData ? `Soil Report (latest):
-- pH: ${soilData.ph}, Nitrogen: ${soilData.nitrogen}, Phosphorus: ${soilData.phosphorus}, Potassium: ${soilData.potassium}
-- Recommendations: ${soilData.recommendations}` : 'No soil report available.'}
+${formatSoilReportContext(soilData)}
 
 ${cropPlan ? `Current Crop Plan: ${cropPlan.crop_name}, Status: ${cropPlan.status}, Stage: ${cropPlan.current_stage ?? 'unknown'}` : 'No active crop plan.'}
 
@@ -109,14 +137,21 @@ ${contextSummaries ? `Recent conversation context:\n${contextSummaries}` : ''}
 ${kbContext ? `Reference knowledge (from the farming knowledge base — prefer this over general knowledge and cite the source when you use it):\n${kbContext}` : ''}
 
 ${languageInstruction}
-Always provide practical, actionable advice relevant to Tamil Nadu climate and farming conditions. Consider the current season (today is ${new Date().toLocaleDateString('en-IN')}).`;
+Response rules:
+- Be concise: 3-6 short bullets or short paragraphs unless the farmer asks for a detailed plan.
+- Start with the direct answer or action. Do not add generic introductions.
+- Include exact dates, weather cautions, quantities, or timing when available from context.
+- Use live weather for irrigation, spraying, sowing, harvesting, and other weather-sensitive advice. Reference specific forecast days when useful.
+- Prefer the knowledge base when relevant; mention the source briefly only when you use it.
+- Do not invent soil values, market prices, pesticide doses, government rules, or unavailable weather data.
+- Today is ${new Date().toLocaleDateString('en-IN')}. Keep all advice relevant to Tamil Nadu climate and farming conditions.`;
 
     const messages: Message[] = [
       ...history,
       { role: 'user', content: message },
     ];
 
-    const reply = await chatWithBedrock(messages, systemPrompt);
+    const reply = await chatWithBedrock(messages, systemPrompt, { maxTokens: 1200 });
 
     // Save chat to DynamoDB asynchronously
     const fullConversation = [...messages, { role: 'assistant' as const, content: reply }];

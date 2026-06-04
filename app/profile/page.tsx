@@ -6,8 +6,21 @@ import ProfileCard from '@/components/profile/ProfileCard';
 import SoilReportUpload from '@/components/profile/SoilReportUpload';
 import { Loader2, FlaskConical } from 'lucide-react';
 
-interface Profile { farmer_id: string; name: string; phone: string; land_area_acres: number; typography: string; preferred_language: string; created_at: string; }
-interface SoilData { ph: number; nitrogen: string; phosphorus: string; potassium: string; organicCarbon: string; recommendations: string; labName: string; reportDate: string; }
+interface Profile { farmer_id: string; name: string; phone: string; address?: string; land_area_acres: number; typography: string; preferred_language: string; created_at: string; }
+interface SoilData {
+  ph: number;
+  nitrogen: string;
+  phosphorus: string;
+  potassium: string;
+  organicCarbon: string;
+  electricalConductivity?: number | null;
+  micronutrients?: Record<string, string | null>;
+  plainLanguageSummary?: string | null;
+  keyFindings?: string[] | null;
+  recommendations: string;
+  labName: string;
+  reportDate: string;
+}
 
 export default function ProfilePage() {
   const t = useTranslations('profile');

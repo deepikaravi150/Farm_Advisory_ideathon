@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { verifyToken } from '@/lib/auth';
 import { chatWithBedrock } from '@/lib/ai/openai';
-import { queryItems, putItem, getItem, deleteItem, Tables } from '@/lib/aws/dynamodb';
+import { queryItems, putItem, getItem, updateItem, deleteItem, Tables } from '@/lib/aws/dynamodb';
 import { generateId, extractCentroid } from '@/lib/utils';
 import { get15DayForecast, type ForecastDay } from '@/lib/weather';
 import { annotateMilestonesWithWeather, forecastSummaryForPrompt } from '@/lib/crop-plan-weather';
@@ -126,6 +126,32 @@ function addDays(date: string, days: number) {
   return d.toISOString().split('T')[0];
 }
 
+function formatSoilReportContext(soilData: Record<string, unknown> | undefined) {
+  if (!soilData) return 'No soil report is available.';
+
+  const micronutrients = soilData.micronutrients && typeof soilData.micronutrients === 'object'
+    ? Object.entries(soilData.micronutrients as Record<string, unknown>)
+        .map(([name, value]) => `${name}: ${value ?? 'unknown'}`)
+        .join(', ')
+    : '';
+  const keyFindings = Array.isArray(soilData.key_findings)
+    ? soilData.key_findings.filter(Boolean).join('; ')
+    : '';
+
+  return [
+    `pH: ${soilData.ph ?? 'unknown'}`,
+    `EC/salinity: ${soilData.electrical_conductivity ?? 'unknown'}`,
+    `Organic carbon: ${soilData.organic_carbon ?? 'unknown'}`,
+    `Nitrogen: ${soilData.nitrogen ?? 'unknown'}`,
+    `Phosphorus: ${soilData.phosphorus ?? 'unknown'}`,
+    `Potassium: ${soilData.potassium ?? 'unknown'}`,
+    micronutrients ? `Micronutrients: ${micronutrients}` : '',
+    soilData.plain_language_summary ? `Farmer-friendly soil summary: ${soilData.plain_language_summary}` : '',
+    keyFindings ? `Key soil findings: ${keyFindings}` : '',
+    soilData.recommendations ? `Soil recommendations: ${soilData.recommendations}` : '',
+  ].filter(Boolean).join('\n');
+}
+
 function buildFallbackPlan(
   cropName: string,
   startDate: string,
@@ -135,7 +161,7 @@ function buildFallbackPlan(
   const acres = Number(profile?.land_area_acres ?? 1) || 1;
   const crop = cropName.trim();
   const soilNote = soilData
-    ? `Current soil report: pH ${soilData.ph ?? 'unknown'}, N ${soilData.nitrogen ?? 'unknown'}, P ${soilData.phosphorus ?? 'unknown'}, K ${soilData.potassium ?? 'unknown'}.`
+    ? `Current soil report details:\n${formatSoilReportContext(soilData)}`
     : 'No soil report is available, so confirm nutrient dose locally before applying fertilizer.';
   const stages = [
     { label: 'Land Preparation', offset: 0, days: 7, cost: 12000, task: `Clear weeds, plough the field, break clods, and level the land for ${crop}. Add well-decomposed farmyard manure and improve drainage based on the field slope. ${soilNote}` },
@@ -211,6 +237,16 @@ const SavePlanSchema = z.object({
   inputDetails: z.record(z.unknown()).optional(),
 });
 
+const ActivatePlanSchema = z.object({
+  action: z.literal('activate'),
+  planId: z.string().min(1),
+});
+
+const DeactivatePlanSchema = z.object({
+  action: z.literal('deactivate'),
+  planId: z.string().min(1),
+});
+
 export async function POST(req: NextRequest) {
   const farmer = getAuthFarmer(req);
   if (!farmer) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -232,8 +268,46 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, savedPlan });
     }
 
+    if (body?.action === 'activate') {
+      const { planId } = ActivatePlanSchema.parse(body);
+      const activeFrom = new Date().toISOString().split('T')[0];
+      await updateItem({
+        TableName: Tables.CROP_PLANS,
+        Key: { farmer_id: farmer.farmerId, plan_id: planId },
+        UpdateExpression: 'SET #s = :s, active_from = :af, updated_at = :u',
+        ExpressionAttributeNames: { '#s': 'status' },
+        ExpressionAttributeValues: {
+          ':s': 'active',
+          ':af': activeFrom,
+          ':u': new Date().toISOString(),
+        },
+      });
+
+      return NextResponse.json({ success: true });
+    }
+
+    if (body?.action === 'deactivate') {
+      const { planId } = DeactivatePlanSchema.parse(body);
+      await updateItem({
+        TableName: Tables.CROP_PLANS,
+        Key: { farmer_id: farmer.farmerId, plan_id: planId },
+        UpdateExpression: 'SET #s = :s, updated_at = :u',
+        ExpressionAttributeNames: { '#s': 'status' },
+        ExpressionAttributeValues: {
+          ':s': 'planned',
+          ':u': new Date().toISOString(),
+        },
+      });
+
+      return NextResponse.json({ success: true });
+    }
+
     const data = GeneratePlanSchema.parse(body);
     const assessmentText = formatAssessment(data.assessment);
+    const outputLanguage =
+      data.locale === 'ta' ? 'Tamil' :
+      data.locale === 'hi' ? 'Hindi' :
+      'English';
 
     const [profile, soilReports] = await Promise.all([
       getItem(Tables.FARMER_PROFILES, { farmer_id: farmer.farmerId }),
@@ -247,6 +321,7 @@ export async function POST(req: NextRequest) {
     ]);
 
     const soilData = soilReports[0];
+    const soilContext = formatSoilReportContext(soilData);
     const today = new Date().toISOString().split('T')[0];
     const startDate = data.startDate || today;
     const forecast = await getFarmerForecast(profile);
@@ -270,19 +345,26 @@ export async function POST(req: NextRequest) {
          Rules:
          - The FIRST stage starts on ${startDate}. Every later stage's "date" follows the previous stage's "endDate" with no gaps/overlaps.
          - Produce 6-10 well-sequenced stages from land preparation through to selling.
-         - Keep all dates consistent with durationDays and the ${startDate} anchor.`;
+         - Keep all dates consistent with durationDays and the ${startDate} anchor.
+         - Keep text farmer-friendly and actionable. Avoid vague tasks like "monitor regularly" unless you say what to check and what action to take.
+         - Return JSON only. Do not wrap it in markdown.`;
 
     const planPrompt = data.farmerState === 'planning_unsure' || data.farmerState === 'planning_specific'
       ? `Validate and create a detailed crop plan for growing ${data.cropName} for a Tamil Nadu farmer:
          - Land: ${profile?.land_area_acres ?? 'unknown'} acres
          - Land type/topography from DB: ${profile?.typography ?? 'general land'}
          - Farmer address from DB: ${profile?.address ?? 'unknown'}
-         - Soil from DB: ${soilData ? `pH ${soilData.ph}, N:${soilData.nitrogen} P:${soilData.phosphorus} K:${soilData.potassium}` : 'no soil data'}
+         - Soil report from DB:
+${soilContext}
          - Today: ${today}
          - Farmer wants to start on: ${startDate}${assessmentText}${forecastBlock}
 
+         Write every farmer-facing text value in ${outputLanguage}: cropName, suitabilityReason, adjustments, milestone labels, tasks, weatherRequirement, sellWindow, and storageNotes.
+         Keep JSON keys, dates, IDs, numbers, and currency values in English/standard format.
+
          First check whether ${data.cropName} can realistically grow in this farmer's area/land/soil using the DB details above.
          If suitable, create the plan. If only conditionally suitable, still create the plan but include required adjustments.
+         Use the soil report to customize land preparation, organic matter improvement, fertilizer planning, micronutrient correction, irrigation/salinity cautions, nutrient management, and pest/disease prevention stages. Do not invent soil values that are not in the report.
          Return JSON:
          {
            "suitable": true,
@@ -306,11 +388,16 @@ export async function POST(req: NextRequest) {
          - Land: ${profile?.land_area_acres ?? 'unknown'} acres
          - Land type/topography from DB: ${profile?.typography ?? 'general land'}
          - Farmer address from DB: ${profile?.address ?? 'unknown'}
-         - Soil from DB: ${soilData ? `pH ${soilData.ph}, N:${soilData.nitrogen} P:${soilData.phosphorus} K:${soilData.potassium}` : 'no soil data'}
+         - Soil report from DB:
+${soilContext}
          - Today: ${today}${assessmentText}${forecastBlock}
+
+         Write every farmer-facing text value in ${outputLanguage}: cropName, currentStage, milestone labels, tasks, weatherRequirement, sellWindow, storageNotes, and immediateAction.
+         Keep JSON keys, dates, IDs, numbers, and currency values in English/standard format.
 
          First check whether ${data.cropName} can realistically grow in this farmer's area/land/soil using the DB details above.
          If suitable, create a remaining-stage plan for the selected crop. If conditionally suitable, include corrective adjustments in the tasks.
+         Use the soil report to customize immediate action, organic matter improvement, fertilizer planning, micronutrient correction, irrigation/salinity cautions, nutrient management, and pest/disease prevention stages. Do not invent soil values that are not in the report.
 
          Return a JSON plan with the REMAINING stages from today onward and current status:
          {
@@ -331,10 +418,15 @@ export async function POST(req: NextRequest) {
     try {
       llmResponse = await chatWithBedrock(
         [{ role: 'user', content: planPrompt }],
-        'You are an expert Tamil Nadu agricultural advisor. Return only valid JSON as requested.',
+        `You are FarmAdvisor, an expert Tamil Nadu agricultural planner.
+Return one valid JSON object only.
+Use the farmer profile, soil data, assessment, and forecast exactly as provided.
+Write farmer-facing text in ${outputLanguage}.
+Do not invent unavailable soil values, land details, market prices, or weather data.
+Make the plan practical for a farmer to execute in the field.`,
         // Detailed multi-stage plans are large; JSON mode + a high token cap keep
         // the response complete and parseable.
-        { json: true, maxTokens: 8000 }
+        { json: true, maxTokens: 7000 }
       );
 
       // JSON mode returns a clean object; fall back to brace extraction otherwise.

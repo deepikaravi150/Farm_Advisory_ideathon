@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Sprout, Phone, Lock, Loader2, AlertCircle } from 'lucide-react';
+import LanguageSwitcher from '@/components/layout/LanguageSwitcher';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -33,6 +34,9 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-brand-50 to-earth-50 flex items-center justify-center p-4">
+      <div className="absolute right-4 top-4">
+        <LanguageSwitcher />
+      </div>
       <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md">
         <div className="flex items-center gap-2 justify-center mb-6">
           <Sprout className="w-8 h-8 text-brand-600" />
