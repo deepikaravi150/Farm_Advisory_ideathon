@@ -526,20 +526,28 @@ export default function CropPlanPage() {
   }
 
   // Apply a plan change the farmer confirmed from the chat panel, and persist it.
+  // Pass the existing plan's id so the edit updates that plan in place instead of
+  // creating a duplicate copy.
   async function applyPlanChange(updated: CropPlan) {
+    const planId = isSavedPlan(activePlan) ? activePlan.planId : undefined;
+    const inputDetails = isSavedPlan(activePlan) ? activePlan.inputDetails ?? null : null;
     setActivePlan(updated);
-    const saved = await savePlan(updated);
+    const saved = await savePlan(updated, inputDetails, planId);
     if (saved) setActivePlan(saved);
   }
 
-  async function savePlan(plan: CropPlan, inputDetails?: Record<string, unknown> | null): Promise<SavedPlan | null> {
+  async function savePlan(
+    plan: CropPlan,
+    inputDetails?: Record<string, unknown> | null,
+    planId?: string
+  ): Promise<SavedPlan | null> {
     setSaving(true);
     setPlanError('');
     try {
       const res = await fetch('/api/crop-plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'save', plan, inputDetails: inputDetails ?? undefined }),
+        body: JSON.stringify({ action: 'save', plan, inputDetails: inputDetails ?? undefined, planId }),
       });
       if (!res.ok) throw new Error('Plan save failed');
       const data = await res.json();
@@ -719,7 +727,8 @@ export default function CropPlanPage() {
               {activePlan && (
                 <button
                   onClick={async () => {
-                    const saved = await savePlan(activePlan, pendingInputDetails);
+                    const planId = isSavedPlan(activePlan) ? activePlan.planId : undefined;
+                    const saved = await savePlan(activePlan, pendingInputDetails, planId);
                     if (saved) {
                       setActivePlan(saved);
                       await refreshPlans();
@@ -819,7 +828,8 @@ export default function CropPlanPage() {
               {pendingInputDetails && (
                 <button
                   onClick={async () => {
-                    const saved = await savePlan(activePlan, pendingInputDetails);
+                    const planId = isSavedPlan(activePlan) ? activePlan.planId : undefined;
+                    const saved = await savePlan(activePlan, pendingInputDetails, planId);
                     if (saved) {
                       setActivePlan(saved);
                       await refreshPlans();

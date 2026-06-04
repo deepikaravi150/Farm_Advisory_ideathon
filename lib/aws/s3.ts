@@ -40,6 +40,6 @@ export async function getUploadPresignedUrl(
   return getSignedUrl(s3, command, { expiresIn });
 }
 
-export function buildS3Key(farmerId: string, type: 'land' | 'soil', filename: string): string {
+export function buildS3Key(farmerId: string, type: 'land' | 'soil' | 'crop', filename: string): string {
   return `${farmerId}/${type}/${Date.now()}-${filename}`;
 }

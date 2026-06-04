@@ -199,12 +199,39 @@ async function persistPlan(
   plan: NormalizedPlan,
   status: string,
   currentStage: string | null,
-  inputDetails?: Record<string, unknown>
+  inputDetails?: Record<string, unknown>,
+  // When provided, the existing plan is updated in place (same id) instead of a
+  // new copy being created. This is what makes an "edit" stay on the same plan.
+  planId?: string
 ) {
   const alertStages = plan.milestones.filter((m) => m.alert).map((m) => m.label);
+  const now = new Date().toISOString();
+
+  // Defaults for a brand-new plan.
+  let createdAt = now;
+  let effectiveStatus = status;
+  let effectiveStage = currentStage;
+  let effectiveInputDetails = inputDetails ?? {};
+  let activeFrom: string | undefined;
+
+  // Editing an existing plan: keep its id and preserve fields the edit payload
+  // doesn't carry (creation time, active status/date, current stage, assessment).
+  if (planId) {
+    const existing = await getItem(Tables.CROP_PLANS, { farmer_id: farmerId, plan_id: planId });
+    if (existing) {
+      createdAt = (existing.created_at as string) ?? now;
+      effectiveStatus = (existing.status as string) ?? status;
+      activeFrom = existing.active_from as string | undefined;
+      effectiveStage = currentStage ?? ((existing.current_stage as string | null) ?? null);
+      if (!inputDetails || Object.keys(inputDetails).length === 0) {
+        effectiveInputDetails = (existing.input_details as Record<string, unknown>) ?? {};
+      }
+    }
+  }
+
   const item = {
     farmer_id: farmerId,
-    plan_id: generateId(),
+    plan_id: planId ?? generateId(),
     crop_name: plan.cropName,
     start_date: plan.startDate,
     milestones: plan.milestones,
@@ -212,12 +239,13 @@ async function persistPlan(
     sell_window: plan.sellWindow,
     storage_notes: plan.storageNotes,
     budget_estimate: plan.totalBudgetEstimate,
-    status,
-    current_stage: currentStage,
-    input_details: inputDetails ?? {},
+    status: effectiveStatus,
+    current_stage: effectiveStage,
+    input_details: effectiveInputDetails,
     weather_alerts: alertStages,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
+    active_from: activeFrom, // undefined is stripped by removeUndefinedValues
+    created_at: createdAt,
+    updated_at: now,
   };
   await putItem(Tables.CROP_PLANS, item);
   return item;
@@ -225,6 +253,8 @@ async function persistPlan(
 
 const SavePlanSchema = z.object({
   action: z.literal('save'),
+  // When present, update this existing plan in place instead of creating a copy.
+  planId: z.string().optional(),
   plan: z.object({
     cropName: z.string(),
     startDate: z.string().optional(),
@@ -256,14 +286,15 @@ export async function POST(req: NextRequest) {
 
     // Branch: persist a plan the farmer selected from AI suggestions.
     if (body?.action === 'save') {
-      const { plan, inputDetails } = SavePlanSchema.parse(body);
+      const { plan, inputDetails, planId } = SavePlanSchema.parse(body);
       const today = new Date().toISOString().split('T')[0];
       const savedPlan = await persistPlan(
         farmer.farmerId,
         { ...plan, startDate: plan.startDate ?? today } as NormalizedPlan,
         'planned',
         null,
-        inputDetails
+        inputDetails,
+        planId
       );
       return NextResponse.json({ success: true, savedPlan });
     }
