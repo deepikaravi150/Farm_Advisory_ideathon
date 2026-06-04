@@ -6,6 +6,10 @@ import StateAssessmentModal, { type AssessmentPayload } from '@/components/crop-
 import CropSuggestions from '@/components/crop-plan/CropSuggestions';
 import PlanTimeline from '@/components/crop-plan/PlanTimeline';
 import PlanChatPanel from '@/components/crop-plan/PlanChatPanel';
+import CurrentStageSection, { type StageProgress } from '@/components/crop-plan/CurrentStageSection';
+import CropDetailsSection from '@/components/crop-plan/CropDetailsSection';
+import LandStateSection, { type SoilData } from '@/components/crop-plan/LandStateSection';
+import { getCropInfo } from '@/lib/crop-info';
 import { Activity, AlertTriangle, CheckCircle2, CloudSun, Droplets, Loader2, RefreshCw, Leaf, Save, Trash2 } from 'lucide-react';
 import type { CropPlan, Milestone, SuggestedCrop } from '@/lib/types/crop-plan';
 
@@ -372,10 +376,19 @@ export default function CropPlanPage() {
   const [translatedCurrentPlanData, setTranslatedCurrentPlanData] = useState<CurrentPlanData | null>(null);
   const [translatingPlan, setTranslatingPlan] = useState(false);
   const [translationError, setTranslationError] = useState('');
+  const [soil, setSoil] = useState<SoilData | null>(null);
 
   useEffect(() => {
     refreshPlans().catch(() => setShowModal(true))
       .finally(() => setInitialLoading(false));
+  }, []);
+
+  // Latest soil report, used by the "current state of land" section.
+  useEffect(() => {
+    fetch('/api/soil', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => setSoil(data?.soil ?? null))
+      .catch(() => setSoil(null));
   }, []);
 
   useEffect(() => {
@@ -618,6 +631,26 @@ export default function CropPlanPage() {
   const localizedDisplayPlan = displayPlan ? { ...displayPlan, cropName: localizedDisplayCropName } : null;
   const localizedRisk = insight ? localizeRisk(insight.risk, locale) : '';
 
+  // Reference data + per-stage progress for the three summary sections below the
+  // saved-plans bar. Looked up from the original (untranslated) crop name.
+  const cropInfo = activePlan ? getCropInfo(activePlan.cropName) : null;
+  const stageProgress: StageProgress[] = displayPlan
+    ? displayPlan.milestones.map((m, i) => {
+        const dates = getMilestoneDates(displayPlan, m, activePlan);
+        return {
+          id: String(m.id ?? i),
+          label: m.label,
+          status: getStageStatus(displayPlan, m, activePlan),
+          date: dates.date,
+          endDate: dates.endDate,
+        };
+      })
+    : [];
+  const currentStageIdx = displayPlan && currentMilestone
+    ? displayPlan.milestones.findIndex((m) => m === currentMilestone)
+    : -1;
+  const currentStageId = currentStageIdx >= 0 ? stageProgress[currentStageIdx]?.id ?? null : null;
+
   useEffect(() => {
     let cancelled = false;
     if (!currentPlanData) {
@@ -805,6 +838,36 @@ export default function CropPlanPage() {
                   </div>
                 );
               })}
+            </div>
+          </div>
+        )}
+
+        {/* Three at-a-glance sections: where the plan stands, what the crop needs,
+            and how the land looks for it. */}
+        {!loading && activePlan && displayPlan && (
+          <div className="mb-6 space-y-6">
+            <CurrentStageSection
+              cropName={localizedDisplayCropName}
+              stages={stageProgress}
+              currentId={currentStageId}
+              insight={insight ? { summary: insight.summary, water: insight.water, action: insight.action } : null}
+              risk={localizedRisk}
+              riskLevel={(insight?.risk as 'High' | 'Medium' | 'Low') ?? 'Low'}
+              locale={locale}
+            />
+            <div className="grid gap-6 lg:grid-cols-2">
+              <CropDetailsSection
+                cropName={localizedDisplayCropName}
+                info={cropInfo}
+                fallback={{
+                  harvestDate: displayPlan.harvestDate,
+                  sellWindow: displayPlan.sellWindow,
+                  budget: displayPlan.totalBudgetEstimate,
+                  stages: displayPlan.milestones.length,
+                }}
+                locale={locale}
+              />
+              <LandStateSection soil={soil} info={cropInfo} cropName={localizedDisplayCropName} locale={locale} />
             </div>
           </div>
         )}
