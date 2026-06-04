@@ -24,7 +24,7 @@ AI-powered crop planning, weather alerts, and personalized farming advice — bu
 | Framework | Next.js 15 (App Router), React 19, TypeScript |
 | Styling | Tailwind CSS, lucide-react icons |
 | i18n | next-intl (`en` / `hi` / `ta`) |
-| LLM / AI | OpenAI — `gpt-4o` (chat/planning), `whisper-1` (STT), `gpt-4o-mini-tts` (TTS), `text-embedding-3-small` (embeddings) |
+| LLM / AI | OpenAI — `gpt-5.2` (chat/planning), `whisper-1` (STT), `gpt-4o-mini-tts` (TTS), `text-embedding-3-small` (embeddings) |
 | Vector DB (RAG) | Qdrant |
 | Data | AWS DynamoDB |
 | Storage / media | AWS S3 |
@@ -116,7 +116,7 @@ See [`.env.example`](.env.example) for the full list. Highlights:
 | Variable | Purpose |
 |---|---|
 | `OPENAI_API_KEY` | OpenAI access (chat, voice, embeddings) — **required** |
-| `OPENAI_CHAT_MODEL` | Default `gpt-4o` |
+| `OPENAI_CHAT_MODEL` | Default `gpt-5.2` |
 | `OPENAI_EMBED_MODEL` | Default `text-embedding-3-small` |
 | `OPENAI_TTS_MODEL` / `OPENAI_TTS_VOICE` / `OPENAI_STT_MODEL` | Voice models (defaults provided) |
 | `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | AWS access |

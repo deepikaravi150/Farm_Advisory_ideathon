@@ -280,11 +280,11 @@ summaries) and for embeddings (RAG). Bedrock is no longer used.
 
 1. Go to: **https://platform.openai.com/api-keys**
 2. Create a new secret key and copy it (shown only once).
-3. Make sure the project/org has access to `gpt-4o` and `text-embedding-3-small`.
+3. Make sure the project/org has access to `gpt-5.2` and `text-embedding-3-small`.
 4. Add it to your `.env`:
    ```
    OPENAI_API_KEY=sk-...
-   OPENAI_CHAT_MODEL=gpt-4o
+   OPENAI_CHAT_MODEL=gpt-5.2
    OPENAI_EMBED_MODEL=text-embedding-3-small
    ```
 
@@ -349,7 +349,7 @@ curl http://localhost:6333/collections/farm_docs
 ```
 
 The chatbot (`/api/chat`) now embeds each question, pulls the top-k matching chunks
-from Qdrant, and has `gpt-4o` answer grounded on them.
+from Qdrant, and has `gpt-5.2` answer grounded on them.
 
 ---
 
@@ -480,7 +480,7 @@ AWS_SECRET_ACCESS_KEY=...
 
 # OpenAI — LLM (chat, crop plans, soil OCR, summaries) + embeddings
 OPENAI_API_KEY=sk-...
-OPENAI_CHAT_MODEL=gpt-4o
+OPENAI_CHAT_MODEL=gpt-5.2
 OPENAI_EMBED_MODEL=text-embedding-3-small
 
 # Qdrant vector DB (RAG) — from Step 5
@@ -537,7 +537,7 @@ Run through this checklist after setup:
 - [ ] `http://localhost:3000` loads the landing page with government schemes
 - [ ] Register a new farmer with a real Tamil Nadu map location
 - [ ] Login and check the dashboard loads with weather data
-- [ ] Send a chat message in English — confirm reply from gpt-4o
+- [ ] Send a chat message in English — confirm reply from gpt-5.2
 - [ ] Send a chat message in Tamil — confirm reply in Tamil
 - [ ] Ask something only in your S3 KB docs — confirm the answer reflects them (RAG)
 - [ ] Try voice input (mic button) — confirm transcription
@@ -552,7 +552,7 @@ Run through this checklist after setup:
 
 | Service | Usage | Est. Cost |
 |---|---|---|
-| OpenAI gpt-4o | ~1,000 chat/plan/OCR calls/month | ~$10–25 |
+| OpenAI gpt-5.2 | ~1,000 chat/plan/OCR calls/month | ~$10–25 |
 | OpenAI embeddings (text-embedding-3-small) | ingest + per-query | <$1 |
 | Qdrant (self-hosted on existing EC2) | container, ~small RAM | $0 (no extra) |
 | DynamoDB | On-demand, light usage | <$1 |
@@ -572,7 +572,7 @@ Run through this checklist after setup:
 
 | Problem | Fix |
 |---|---|
-| OpenAI `401`/`invalid_api_key` | Check `OPENAI_API_KEY` in `.env` and that the project has `gpt-4o` access (Step 4) |
+| OpenAI `401`/`invalid_api_key` | Check `OPENAI_API_KEY` in `.env` and that the project has `gpt-5.2` access (Step 4) |
 | Chat returns generic answers / RAG empty | Confirm Qdrant is up and `npm run ingest` loaded points (`curl .../collections/farm_docs`) |
 | `ResourceNotFoundException` on DynamoDB | Confirm table names match exactly (case-sensitive) and region is `ap-south-1` |
 | Weather widget shows error | Verify `OPENWEATHER_API_KEY` is set and land coordinates exist in profile |

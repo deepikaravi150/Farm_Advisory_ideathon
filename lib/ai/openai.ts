@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 
 const apiKey = process.env.OPENAI_API_KEY ?? '';
-const chatModel = process.env.OPENAI_CHAT_MODEL ?? 'gpt-4o';
+const chatModel = process.env.OPENAI_CHAT_MODEL ?? 'gpt-5.2';
 const embedModel = process.env.OPENAI_EMBED_MODEL ?? 'text-embedding-3-small';
 const ttsModel = process.env.OPENAI_TTS_MODEL ?? 'gpt-4o-mini-tts';
 const ttsVoice = process.env.OPENAI_TTS_VOICE ?? 'alloy';
