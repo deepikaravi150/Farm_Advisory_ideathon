@@ -209,6 +209,7 @@
     "soilReportSubtitle": "Upload your lab soil test report. AI will extract nutrient data automatically.",
     "farmerId": "Farmer ID",
     "phone": "Phone",
+    "address": "Farm address",
     "landArea": "Land Area",
     "landType": "Land Type",
     "language": "Language",
@@ -224,8 +225,10 @@
     "ph": "pH",
     "nitrogen": "Nitrogen",
     "phosphorus": "Phosphorus",
-    "potassium": "Potassium",
-    "recommendations": "AI Recommendations",
-    "uploadFailed": "Upload failed. Please try again."
+      "potassium": "Potassium",
+      "recommendations": "AI Recommendations",
+      "whatThisMeans": "What this means",
+      "keyFindings": "Key findings",
+      "uploadFailed": "Upload failed. Please try again."
   }
 }

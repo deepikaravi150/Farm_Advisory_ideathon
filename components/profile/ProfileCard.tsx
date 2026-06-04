@@ -7,6 +7,7 @@ interface Profile {
   farmer_id: string;
   name: string;
   phone: string;
+  address?: string;
   land_area_acres: number;
   typography: string;
   preferred_language: string;
@@ -18,6 +19,7 @@ interface Props { profile: Profile; onSave: (data: Partial<Profile>) => Promise<
 export default function ProfileCard({ profile, onSave }: Props) {
   const t = useTranslations('profile');
   const tc = useTranslations('common');
+  const addressLabel = t.has('address') ? t('address') : 'Farm address';
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({ name: profile.name, typography: profile.typography, landAreaAcres: profile.land_area_acres, preferredLanguage: profile.preferred_language });
   const [saving, setSaving] = useState(false);
@@ -64,6 +66,13 @@ export default function ProfileCard({ profile, onSave }: Props) {
         <div className="flex items-center gap-3 bg-gray-50 rounded-xl p-3">
           <Phone className="w-4 h-4 text-gray-400" />
           <div><p className="text-xs text-gray-400">{t('phone')}</p><p className="font-medium text-gray-700">{profile.phone}</p></div>
+        </div>
+        <div className="flex items-start gap-3 bg-gray-50 rounded-xl p-3 sm:col-span-2">
+          <MapPin className="w-4 h-4 text-gray-400 mt-0.5" />
+          <div>
+            <p className="text-xs text-gray-400">{addressLabel}</p>
+            <p className="font-medium text-gray-700 whitespace-pre-wrap">{profile.address || '—'}</p>
+          </div>
         </div>
         <div className="flex items-center gap-3 bg-gray-50 rounded-xl p-3">
           <Layers className="w-4 h-4 text-gray-400" />

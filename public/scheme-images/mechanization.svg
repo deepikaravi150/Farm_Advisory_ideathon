@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-label="Agricultural mechanization scheme icon">
+  <rect width="160" height="160" rx="24" fill="#fff7ed"/>
+  <path d="M33 88h54l14-29h24l9 29h12v21h-20a25 25 0 0 0-49 0H62a22 22 0 0 0-44 0H8V96c0-7 5-12 12-12h13z" fill="#f97316"/>
+  <circle cx="40" cy="111" r="15" fill="#1f2937"/>
+  <circle cx="40" cy="111" r="6" fill="#e5e7eb"/>
+  <circle cx="102" cy="111" r="18" fill="#1f2937"/>
+  <circle cx="102" cy="111" r="7" fill="#e5e7eb"/>
+  <path d="M45 70h25l-8 18H45z" fill="#fed7aa"/>
+</svg>

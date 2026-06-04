@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-label="PM-KISAN scheme icon">
+  <rect width="160" height="160" rx="24" fill="#ecfdf5"/>
+  <circle cx="80" cy="58" r="24" fill="#16a34a"/>
+  <path d="M45 128c5-28 25-42 55-42 8 0 16 2 23 5-7 7-13 16-17 29l-4 14H50c-4 0-6-3-5-6z" fill="#22c55e"/>
+  <path d="M101 113h40v16h-40z" fill="#f59e0b"/>
+  <path d="M111 103h30v14h-30z" fill="#fbbf24"/>
+  <path d="M58 58c10 8 24 8 38 0" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-label="PMFBY scheme icon">
+  <rect width="160" height="160" rx="24" fill="#eff6ff"/>
+  <path d="M80 26l54 20v35c0 34-22 56-54 70-32-14-54-36-54-70V46z" fill="#2563eb"/>
+  <path d="M80 42l36 14v26c0 23-14 38-36 49-22-11-36-26-36-49V56z" fill="#93c5fd"/>
+  <path d="M50 88c13-19 32-26 60-21-10 4-17 11-21 22 10-2 19-1 27 4-20 2-34 9-43 21-4-12-12-20-23-26z" fill="#16a34a"/>
+</svg>

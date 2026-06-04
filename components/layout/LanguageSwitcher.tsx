@@ -1,6 +1,7 @@
 'use client';
-import { useRouter, usePathname } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { useLocale } from 'next-intl';
 import { Globe } from 'lucide-react';
 import Cookies from 'js-cookie';
 
@@ -13,8 +14,7 @@ const LANGS = [
 export default function LanguageSwitcher() {
   const [open, setOpen] = useState(false);
   const router = useRouter();
-  const pathname = usePathname();
-  const current = Cookies.get('locale') ?? 'en';
+  const current = useLocale();
 
   function switchLang(code: string) {
     Cookies.set('locale', code, { expires: 365 });

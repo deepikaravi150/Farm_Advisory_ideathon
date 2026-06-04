@@ -1,4 +1,4 @@
-import OpenAI from 'openai';
+import OpenAI, { toFile } from 'openai';
 
 const apiKey = process.env.OPENAI_API_KEY ?? '';
 const chatModel = process.env.OPENAI_CHAT_MODEL ?? 'gpt-5.2';
@@ -32,7 +32,7 @@ export async function chatWithBedrock(
 ): Promise<string> {
   const res = await client.chat.completions.create({
     model: chatModel,
-    max_tokens: options.maxTokens ?? 2048,
+    max_completion_tokens: options.maxTokens ?? 2048,
     ...(options.json ? { response_format: { type: 'json_object' as const } } : {}),
     messages: [
       { role: 'system', content: systemPrompt },
@@ -54,7 +54,7 @@ export async function extractTextFromDocument(
 ): Promise<string> {
   const res = await client.chat.completions.create({
     model: chatModel,
-    max_tokens: 4096,
+    max_completion_tokens: 4096,
     messages: [
       {
         role: 'user',
@@ -69,6 +69,70 @@ export async function extractTextFromDocument(
     ],
   });
   return res.choices[0]?.message?.content ?? '';
+}
+
+export async function extractTextFromPdfDocument(
+  base64Content: string,
+  filename: string,
+  extractionPrompt: string
+): Promise<string> {
+  const fileData = `data:application/pdf;base64,${base64Content}`;
+  let base64Error = '';
+
+  try {
+    const res = await client.responses.create({
+      model: chatModel,
+      max_output_tokens: 4096,
+      input: [{
+        role: 'user',
+        content: [
+          { type: 'input_file', filename, file_data: fileData },
+          { type: 'input_text', text: extractionPrompt },
+        ],
+      }],
+    } as Parameters<typeof client.responses.create>[0]);
+
+    const text = (res as { output_text?: string }).output_text ?? '';
+    if (text) return text;
+  } catch (err) {
+    base64Error = err instanceof Error ? err.message : String(err);
+  }
+
+  let uploadedFileId = '';
+
+  try {
+    const uploaded = await client.files.create({
+      file: await toFile(Buffer.from(base64Content, 'base64'), filename || 'soil-report.pdf', {
+        type: 'application/pdf',
+      }),
+      purpose: 'user_data',
+    });
+    uploadedFileId = uploaded.id;
+
+    const res = await client.responses.create({
+      model: chatModel,
+      max_output_tokens: 4096,
+      input: [{
+        role: 'user',
+        content: [
+          { type: 'input_file', file_id: uploaded.id },
+          { type: 'input_text', text: extractionPrompt },
+        ],
+      }],
+    } as Parameters<typeof client.responses.create>[0]);
+
+    const text = (res as { output_text?: string }).output_text ?? '';
+    if (text) return text;
+
+    throw new Error('OpenAI returned an empty PDF extraction response.');
+  } catch (err) {
+    const uploadError = err instanceof Error ? err.message : String(err);
+    throw new Error(`PDF visual extraction failed. Base64 input error: ${base64Error || 'none'}. Uploaded file error: ${uploadError}`);
+  } finally {
+    if (uploadedFileId) {
+      client.files.del(uploadedFileId).catch(() => undefined);
+    }
+  }
 }
 
 export async function summarizeText(text: string): Promise<string> {
@@ -86,7 +150,7 @@ export async function summarizeText(text: string): Promise<string> {
 export async function extractFarmingContextTags(text: string): Promise<string[]> {
   const res = await client.chat.completions.create({
     model: chatModel,
-    max_tokens: 256,
+    max_completion_tokens: 256,
     response_format: { type: 'json_object' },
     messages: [
       {

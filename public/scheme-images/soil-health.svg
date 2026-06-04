@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-label="Soil Health Card scheme icon">
+  <rect width="160" height="160" rx="24" fill="#f0fdf4"/>
+  <rect x="36" y="28" width="88" height="116" rx="12" fill="#16a34a"/>
+  <rect x="48" y="45" width="64" height="10" rx="5" fill="#dcfce7"/>
+  <rect x="48" y="65" width="38" height="8" rx="4" fill="#bbf7d0"/>
+  <rect x="48" y="83" width="50" height="8" rx="4" fill="#bbf7d0"/>
+  <path d="M82 126c-17-20-8-39 23-48 4 30-4 45-23 48z" fill="#86efac"/>
+  <path d="M80 125c2-16 11-28 25-37" fill="none" stroke="#166534" stroke-width="5" stroke-linecap="round"/>
+</svg>
