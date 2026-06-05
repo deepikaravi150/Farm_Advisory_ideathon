@@ -1,0 +1,1139 @@
+FarmAdvisor / Farm_Advisory_ideathon - Full Architecture Reference
+Generated on: 2026-06-05
+Purpose: This file is written as a complete text brief that can be given to Claude or any diagramming tool to create a full application architecture diagram.
+
+================================================================================
+1. EXECUTIVE SUMMARY
+================================================================================
+
+FarmAdvisor is a multilingual AI-powered farm advisory web application for Tamil Nadu farmers. It is built with Next.js App Router and provides:
+
+- Farmer registration and login with JWT cookie authentication.
+- Farmer profile management with land details, address, phone, land area, land photo, and preferred language.
+- Dashboard with weather, land/map information, recent chats, government schemes, and advisor access.
+- AI chat assistant with RAG knowledge retrieval, farmer memory, weather, soil report, crop plans, and optional crop image diagnosis.
+- Crop planning workflow that creates AI-generated crop schedules based on farmer profile, crop, land, weather forecast, soil report, and assessment answers.
+- Saved crop plans with active/inactive status. Multiple plans can be active.
+- Current plan widgets derived from the active plan stage, active date, crop, soil report, weather, water, land, fertilizer, manure, and pesticide needs.
+- Soil report upload and extraction using OpenAI vision/file processing. Original PDF/image and extracted JSON are stored in S3, and normalized report data is stored in DynamoDB.
+- Government schemes carousel and schemes API.
+- Voice input/output using OpenAI speech APIs.
+- SMS notification route using AWS SNS.
+- Multilingual UI and AI responses for English, Hindi, and Tamil using next-intl plus an AI translation API.
+
+The system combines local UI translations, dynamic LLM translation, AWS storage, DynamoDB persistence, OpenAI models, Open-Meteo weather data, Qdrant vector search, and S3-based media storage.
+
+================================================================================
+2. HIGH LEVEL TECHNOLOGY STACK
+================================================================================
+
+Frontend:
+- Next.js 15 App Router
+- React 19
+- TypeScript
+- Tailwind CSS
+- next-intl for localization
+- lucide-react icons
+- Leaflet / react-leaflet for land map selection and map display
+- React Flow dependency is present for possible flow diagrams or plan visualization
+
+Backend:
+- Next.js API routes under app/api
+- Node runtime for API logic
+- Zod validation
+- JWT authentication
+- bcryptjs password hashing
+
+AI / ML:
+- OpenAI Chat Completions for advisor chat, crop plan generation, JSON translation, summarization, memory extraction, and crop diagnosis prompt handling
+- OpenAI Responses API for PDF/file style extraction where used
+- OpenAI vision input for image/document extraction
+- OpenAI embeddings for RAG
+- OpenAI speech APIs for transcription and TTS
+
+Cloud / Data:
+- AWS DynamoDB for farmer profiles, chat history, crop plans, soil reports, and government schemes
+- AWS S3 for land images, soil report PDFs/images, extracted soil JSON, and other media
+- AWS SNS for SMS notifications
+- AWS Polly and Transcribe client wrappers exist, although current speech routes use OpenAI speech helpers
+- Qdrant vector database for knowledge base retrieval
+
+External Data:
+- Open-Meteo forecast API for current weather and 16-day forecast
+- Nominatim reverse geocoding for weather city/farm label
+- Data.gov.in Agmarknet API for market prices
+
+================================================================================
+3. PROJECT STRUCTURE
+================================================================================
+
+Root:
+- package.json: dependencies and scripts
+- next.config.ts: Next.js config, next-intl plugin, standalone output, AWS image domains
+- middleware.ts: route protection using auth_token cookie
+- tsconfig.json: strict TypeScript and @/* alias
+- README.md: project setup summary
+- public/locales/en/common.json
+- public/locales/hi/common.json
+- public/locales/ta/common.json
+- scripts/ingest-kb.ts: knowledge base ingestion into Qdrant
+
+App routes:
+- app/page.tsx: landing page
+- app/layout.tsx: root layout and i18n provider
+- app/(auth)/login/page.tsx: login screen
+- app/(auth)/register/page.tsx: registration screen
+- app/dashboard/page.tsx: authenticated farmer dashboard
+- app/crop-plan/page.tsx: crop planning and saved/current plan screen
+- app/profile/page.tsx: profile, farmer memory, and soil report upload
+- app/chat/[id]/page.tsx: chat detail page
+
+API routes:
+- app/api/auth/register/route.ts
+- app/api/auth/login/route.ts
+- app/api/auth/farmers.ts
+- app/api/chat/route.ts
+- app/api/crop-plan/route.ts
+- app/api/crop-plan/chat/route.ts
+- app/api/farmer/profile/route.ts
+- app/api/farmer/memory/route.ts
+- app/api/soil/upload/route.ts
+- app/api/soil/route.ts
+- app/api/weather/route.ts
+- app/api/market-prices/route.ts
+- app/api/speech/transcribe/route.ts
+- app/api/speech/synthesize/route.ts
+- app/api/translate/route.ts
+- app/api/upload/presigned/route.ts
+- app/api/notifications/sms/route.ts
+- app/api/schemes/route.ts
+- app/api/health/route.ts
+
+Library folders:
+- lib/auth.ts: JWT and password hashing helpers
+- lib/aws/dynamodb.ts: DynamoDB document client and helpers
+- lib/aws/s3.ts: S3 upload and presigned URL helpers
+- lib/aws/sns.ts: SMS helpers
+- lib/aws/polly.ts: Polly wrapper
+- lib/aws/transcribe.ts: Transcribe wrapper
+- lib/ai/openai.ts: OpenAI chat, embeddings, document extraction, speech, summarization, memory extraction
+- lib/ai/rag.ts: retrieval wrapper
+- lib/ai/vectorstore.ts: Qdrant collection/search/upsert
+- lib/weather.ts: Open-Meteo weather helpers
+- lib/crop-plan-weather.ts: plan milestone weather annotation and forecast summaries
+- lib/memory.ts: durable farmer memory facts
+- lib/crop-doctor.ts: crop image diagnosis prompt/parser
+- lib/crop-info.ts: crop metadata and advisory helpers
+- lib/farm-advice.ts: farm recommendation helpers
+- lib/i18n.ts: next-intl message loading
+- lib/utils.ts: IDs, helpers, formatting
+
+Component folders:
+- components/layout: Navbar, LanguageSwitcher, LocationSelector
+- components/landing: HeroSection, SchemesCarousel, landing feature sections
+- components/register: FarmerDetailsForm, LandMapSelector
+- components/dashboard: WeatherWidget, LandMap, RecentChats, dashboard cards
+- components/chatbot: ChatPanel, VoiceInput, VoiceOutput
+- components/crop-plan: plan creation, assessment, timeline, current stage widgets, plan assistant
+- components/profile: ProfileCard, SoilReportUpload, FarmerMemorySection
+
+================================================================================
+4. ROUTING AND AUTHENTICATION ARCHITECTURE
+================================================================================
+
+Authentication model:
+- Farmers register using name, phone, password, address, land boundary, typography, land area, and optional land image.
+- Passwords are hashed with bcryptjs.
+- Login validates phone/password and creates a signed JWT.
+- JWT is stored in an httpOnly cookie named auth_token.
+- Cookie defaults:
+  - path: /
+  - maxAge: 7 days
+  - sameSite: lax
+  - secure only when COOKIE_SECURE=true
+
+JWT payload:
+- farmerId
+- phone
+- name
+
+Middleware:
+- middleware.ts protects all non-public routes.
+- Public paths include:
+  - /
+  - /login
+  - /register
+  - /api/auth
+  - /api/schemes
+  - /api/health
+  - /_next
+  - /favicon
+- If auth_token is missing for a protected page/API path, user is redirected to /login?from=<current-path>.
+
+Important auth API routes:
+- POST /api/auth/register:
+  - Validates farmer profile fields with Zod.
+  - Checks duplicate farmer_id and phone.
+  - Uses DynamoDB phone-index where available, with scan fallback.
+  - Stores farmer profile in DynamoDB farmer_profiles.
+
+- POST /api/auth/login:
+  - Looks up farmer by phone.
+  - Compares bcrypt password.
+  - Sets auth_token cookie.
+  - Returns safe farmer data.
+
+- GET /api/farmer/profile:
+  - Reads authenticated farmer profile.
+  - Removes password_hash before response.
+
+- PATCH /api/farmer/profile:
+  - Updates editable profile fields:
+    - name
+    - typography
+    - landAreaAcres
+    - preferredLanguage
+    - landPictureS3Key
+
+================================================================================
+5. INTERNATIONALIZATION AND LANGUAGE ARCHITECTURE
+================================================================================
+
+Supported locales:
+- en: English
+- hi: Hindi
+- ta: Tamil
+
+Static UI translation:
+- next-intl loads messages from:
+  - public/locales/en/common.json
+  - public/locales/hi/common.json
+  - public/locales/ta/common.json
+- lib/i18n.ts provides request config.
+- LanguageSwitcher changes the selected locale and stores it client-side/cookie-based for UI rendering.
+
+Dynamic content translation:
+- Dynamic LLM/database content is translated using POST /api/translate.
+- Translate route supports kind:
+  - crop_plan
+  - soil_report
+  - current_plan_details
+- For crop plans, it translates farmer-facing strings inside generated plan objects.
+- For soil reports, it translates plainLanguageSummary, keyFindings, and recommendations while preserving technical values such as pH, EC, NPK labels, numbers, units, and chemical names where needed.
+- For current plan details, it translates farmer-facing widgets and arrays while preserving dates, numbers, units, pH, EC, NPK, and chemical symbols.
+- There is a local rule-based fallback for common crop-plan/weather phrases if OpenAI translation fails or returns unchanged text.
+
+Important behavior expectation:
+- When the farmer changes language, both static UI labels and dynamic database/LLM content should be re-rendered or translated to the selected locale.
+- Crop plan milestones, weather warnings, current plan widgets, soil report text, chat assistant content, government scheme text, and crop detail widgets should all use the selected language.
+
+================================================================================
+6. DATA STORAGE ARCHITECTURE
+================================================================================
+
+DynamoDB tables from lib/aws/dynamodb.ts:
+
+1. farmer_profiles
+   Purpose:
+   - Stores farmer account and profile data.
+   Main fields:
+   - farmer_id
+   - unique_id
+   - phone
+   - name
+   - address
+   - land_coordinates
+   - typography
+   - land_area_acres
+   - land_picture_s3_key
+   - password_hash
+   - preferred_language
+   - memory
+   - created_at
+   Access patterns:
+   - Get by farmer_id.
+   - Query by phone through phone-index if configured.
+   - Scan fallback for phone lookup.
+
+2. chat_history
+   Purpose:
+   - Stores AI chat sessions and summaries.
+   Main fields:
+   - farmer_id
+   - timestamp
+   - chat_id
+   - messages
+   - summary
+   - farming_context_tags
+   Access patterns:
+   - Query by farmer_id, reverse chronological, limit 10.
+   - Used as recent context for future advisor prompts.
+
+3. crop_plans
+   Purpose:
+   - Stores generated and saved crop plans.
+   Main fields:
+   - farmer_id
+   - plan_id
+   - crop_name
+   - start_date
+   - harvest_date
+   - sell_window
+   - storage_notes
+   - budget_estimate
+   - milestones
+   - weather_alerts
+   - input_details
+   - status: planned or active
+   - active_from
+   - current_stage
+   - created_at
+   - updated_at
+   Access patterns:
+   - Query latest plans by farmer_id.
+   - Update status to active/planned.
+   - Delete by farmer_id + plan_id.
+   - Persist generated or edited plans.
+
+4. soil_reports
+   Purpose:
+   - Stores normalized soil report extraction results.
+   Main fields:
+   - farmer_id
+   - uploaded_at
+   - report_id
+   - s3_key
+   - json_s3_key
+   - file_hash
+   - file_name
+   - content_type
+   - locale
+   - ph
+   - nitrogen
+   - phosphorus
+   - potassium
+   - organic_carbon
+   - electrical_conductivity
+   - micronutrients
+   - plain_language_summary
+   - key_findings
+   - recommendations
+   - lab_name
+   - report_date
+   - is_current
+   Access patterns:
+   - Query by farmer_id for latest/current report.
+   - Duplicate detection by file_hash.
+   - Previous reports marked not current when a new/current report is saved.
+
+5. government_schemes
+   Purpose:
+   - Stores government scheme records shown on landing/government schemes section.
+   Access patterns:
+   - GET /api/schemes scans and returns all schemes.
+   - POST /api/schemes seeds schemes using x-admin-secret.
+
+S3 bucket:
+- Bucket from S3_BUCKET_MEDIA, fallback farm-advisor-media.
+- Region from AWS_REGION, fallback ap-south-1.
+- Used for:
+  - farmer land images
+  - soil report PDFs/images
+  - soil extraction JSON
+  - crop images for diagnosis where applicable
+
+S3 key pattern:
+- buildS3Key(farmerId, type, filename)
+- General shape: <farmerId>/<type>/<timestamp>-<filename>
+- Soil extraction JSON shape:
+  - <farmerId>/soil/<reportId>-soil-report-extraction.json
+
+Duplicate soil report behavior:
+- Soil upload computes SHA-256 hash of the uploaded file.
+- If the same farmer uploads the same PDF/image again, the system does not upload a duplicate file and does not create duplicate JSON.
+- Existing matching report is marked current and returned.
+
+================================================================================
+7. AI / LLM ARCHITECTURE
+================================================================================
+
+OpenAI configuration:
+- OPENAI_API_KEY is required for AI routes.
+- OPENAI_CHAT_MODEL controls chat/generation model.
+- User has configured OPENAI_CHAT_MODEL=gpt-5.2 in .env.local.
+- Embeddings use OpenAI embedding helper, vector size 1536 for text-embedding-3-small.
+
+Main OpenAI helper file:
+- lib/ai/openai.ts
+
+OpenAI capabilities used:
+- Chat completions for:
+  - general advisor chat
+  - crop plan generation
+  - crop plan assistant updates
+  - JSON translation
+  - soil text interpretation fallback
+  - chat summarization
+  - farmer memory extraction
+- Responses/file flow for PDF soil report extraction.
+- Vision input for image-based soil/crop diagnosis.
+- Embeddings for RAG.
+- Speech transcription.
+- Speech synthesis.
+
+AI prompt grounding inputs:
+- farmer profile:
+  - name
+  - address
+  - typography
+  - land area
+  - land coordinates
+- latest/current soil report:
+  - pH, EC, organic carbon
+  - N/P/K status
+  - micronutrients
+  - summary/findings/recommendations
+- current weather and forecast:
+  - current temperature, humidity, wind, weather description
+  - 5-day/16-day forecast depending on route
+- saved/active crop plans:
+  - crop
+  - milestones
+  - status
+  - active_from
+  - current stage
+- durable memory:
+  - extracted facts from previous conversations
+- recent chat summaries:
+  - last two chat summaries and tags
+- RAG knowledge:
+  - top matching chunks from Qdrant
+- optional crop image diagnosis:
+  - parsed disease/pest/condition data
+
+Important prompt rule:
+- The system is instructed not to invent soil values or farm measurements. If no soil report is available, it must say so and give general guidance.
+
+================================================================================
+8. RAG / KNOWLEDGE BASE ARCHITECTURE
+================================================================================
+
+Files:
+- lib/ai/rag.ts
+- lib/ai/vectorstore.ts
+- scripts/ingest-kb.ts
+
+Vector database:
+- Qdrant
+- URL from QDRANT_URL, fallback http://localhost:6333
+- Collection from QDRANT_COLLECTION, fallback farm_docs
+- Vector size: 1536
+- Distance: cosine
+
+Retrieval flow:
+1. User message is embedded using OpenAI embeddings.
+2. Qdrant search returns top k similar chunks.
+3. retrieveContext formats chunks as numbered source sections.
+4. Advisor chat prompt includes retrieved context.
+5. If Qdrant is unavailable, retrieval returns an empty string and chat continues without RAG.
+
+Knowledge ingestion:
+- scripts/ingest-kb.ts ingests knowledge documents/chunks.
+- Chunks are embedded with OpenAI.
+- Chunks are upserted into Qdrant with source metadata.
+
+================================================================================
+9. WEATHER ARCHITECTURE
+================================================================================
+
+Weather provider:
+- Open-Meteo forecast API
+- Reverse geocoding through Nominatim
+
+File:
+- lib/weather.ts
+
+API:
+- GET /api/weather
+
+Weather route flow:
+1. Authenticate farmer using auth_token.
+2. Read farmer profile from DynamoDB.
+3. Extract centroid from land_coordinates.
+4. If no coordinates exist, use fallback Chennai coordinates.
+5. Fetch current weather and 16-day forecast.
+6. Return current weather and forecast to dashboard/crop-plan.
+
+Weather data structure:
+- Current:
+  - temp
+  - feels_like
+  - humidity
+  - description
+  - emoji
+  - wind_speed
+  - city/farm label
+- Forecast day:
+  - date
+  - temp_min
+  - temp_max
+  - description
+  - emoji
+  - rain_mm
+
+Crop plan weather integration:
+- lib/crop-plan-weather.ts annotates milestones with weather information and warning text.
+- Weather is used to avoid heavy rain, waterlogging, thunderstorm days, spraying/fertilizing during storm/rain, and unsuitable field operation windows.
+- Dashboard weather widget shows a weekly forecast summary and highlights thunderstorm/rain risk in selected language.
+
+================================================================================
+10. SOIL REPORT ARCHITECTURE
+================================================================================
+
+Frontend:
+- components/profile/SoilReportUpload
+- Located in profile page.
+- Farmer uploads PDF/image soil report.
+- Supports selected language.
+- Shows extracted result cards:
+  - What this means
+  - Key findings
+  - pH
+  - Nitrogen
+  - Phosphorus
+  - Potassium
+  - AI recommendations
+
+Backend:
+- POST /api/soil/upload
+- GET /api/soil
+
+Upload flow:
+1. Farmer selects PDF/image soil report.
+2. Client sends multipart form data with file and locale.
+3. API verifies auth_token.
+4. API checks OPENAI_API_KEY.
+5. File buffer is read.
+6. SHA-256 hash is computed for duplicate detection.
+7. Existing farmer soil reports are checked for same hash.
+8. If duplicate:
+   - Previous reports are marked not current.
+   - Existing duplicate is marked current.
+   - Existing soilData, reportId, s3Key, and jsonS3Key are returned.
+   - PDF/image is not uploaded again.
+   - JSON is not uploaded again.
+9. If new:
+   - Original report is uploaded to S3.
+   - PDF extraction uses OpenAI file/document handling first.
+   - If PDF extraction fails, pdf-parse text fallback can be used.
+   - Image extraction uses OpenAI vision.
+   - OpenAI returns strict JSON.
+   - Extracted JSON is uploaded to S3.
+   - Normalized fields are stored in DynamoDB.
+   - Previous reports are marked not current.
+   - New report is marked current.
+
+Soil report fields used by crop planning:
+- pH
+- electrical conductivity / salinity
+- organic carbon
+- nitrogen
+- phosphorus
+- potassium
+- micronutrients such as zinc, copper, iron, manganese
+- plain-language summary
+- key findings
+- recommendations
+
+How soil report influences crop plan:
+- Land preparation guidance uses soil pH, EC, organic carbon, and drainage needs.
+- Fertilizer recommendations use N/P/K status.
+- Manure/organic matter recommendations use organic carbon status.
+- Micronutrient recommendations use zinc/copper/iron/manganese findings.
+- Irrigation/water advice can use salinity/EC and drainage conditions.
+- Crop plan prompts explicitly say not to invent missing soil data.
+
+================================================================================
+11. CROP PLAN ARCHITECTURE
+================================================================================
+
+Frontend:
+- app/crop-plan/page.tsx
+- components/crop-plan/*
+
+Main features:
+- Create crop plan from user inputs.
+- Choose farmer state:
+  - planning_unsure
+  - planning_specific
+  - mid_grow
+- Ask assessment questions.
+- Generate AI crop plan.
+- Save crop plan.
+- View saved plans.
+- Mark one or more plans active.
+- Mark active plans inactive.
+- Show selected plan details.
+- Show current stage widget based on active_from date.
+- Show crop/land/water/fertilizer/pesticide/manure requirement widgets above the plan assistant.
+- Plan assistant can answer questions and modify plan.
+
+Backend:
+- GET /api/crop-plan
+- POST /api/crop-plan
+- DELETE /api/crop-plan?planId=<id>
+- POST /api/crop-plan/chat
+
+Plan generation flow:
+1. User selects crop/planning state and fills required assessment.
+2. API validates input with Zod.
+3. API reads farmer profile from DynamoDB.
+4. API reads latest/current soil report.
+5. API reads durable farmer memory.
+6. API fetches farm weather forecast from land centroid.
+7. Prompt is built with:
+   - crop name
+   - farmer state
+   - land area
+   - address
+   - typography
+   - farmer assessment
+   - soil report details
+   - weather forecast
+   - memory facts
+   - selected locale/language
+8. OpenAI is asked to return structured JSON.
+9. Returned plan is normalized.
+10. Milestones are annotated with weather warnings.
+11. Plan is saved in DynamoDB crop_plans.
+12. API returns normalized planData.
+
+Expected crop plan shape:
+- cropName
+- startDate
+- harvestDate
+- sellWindow
+- storageNotes
+- budgetEstimate
+- weatherAlerts
+- milestones array
+
+Milestone shape:
+- id
+- label
+- date
+- endDate
+- durationDays
+- tasks
+- estimatedCost
+- weatherRequirement
+- weatherSummary
+- alertAdvice
+
+Active plan behavior:
+- Saved plans can be activated.
+- Multiple saved plans can be active.
+- Active plan stores active_from.
+- Current stage calculation must be based on active_from, not the real current date unless active_from is the current date.
+- Farmer can deactivate an active plan, changing status back to planned.
+- Current plan widgets are shown only when at least one plan is active.
+
+Current stage/widget logic:
+- Current stage is derived from active_from and milestone durations.
+- If active_from changes or the plan is activated later, the stage timeline shifts from that activation date.
+- The current stage changes as days pass relative to active_from.
+- Widgets should use actual plan data and soil report data, not generic recommendations.
+
+Current widgets:
+1. Current stage card:
+   - crop
+   - stage name
+   - starting date derived from active_from and milestone position
+   - priority/risk
+   - stage task summary
+
+2. Crop info widget:
+   - crop name
+   - harvest date
+   - sell window
+   - budget
+   - stage/crop context
+
+3. Land/current requirement widget:
+   - land condition based on milestone tasks
+   - water/irrigation requirement
+   - weather restrictions
+   - crop input needs
+
+4. Fertilizer/manure/pesticide widget:
+   - uses soil report N/P/K and micronutrients
+   - manure based on organic carbon
+   - pesticide only when plan stage/crop diagnosis/weather context supports it
+   - avoids generic unsupported claims
+
+Plan assistant:
+- Placed below current plan widgets.
+- Uses current selected plan, farmer profile, soil report, memory, and weather.
+- Can answer questions and return an updated plan JSON.
+
+================================================================================
+12. CHAT ASSISTANT ARCHITECTURE
+================================================================================
+
+Frontend:
+- components/chatbot/ChatPanel
+- components/chatbot/VoiceInput
+- components/chatbot/VoiceOutput
+- Chat UI appears on dashboard and plan assistant areas.
+
+Backend:
+- POST /api/chat
+- GET /api/chat
+
+POST /api/chat supports:
+- JSON chat message
+- multipart/form-data with optional crop image
+
+Chat request flow:
+1. Authenticate farmer.
+2. Read request message, history, locale, and optional image.
+3. If crop image exists:
+   - Validate image type and size.
+   - Upload to S3 where applicable.
+   - Use OpenAI vision to diagnose crop issue.
+   - Parse diagnosis and include it in prompt.
+4. In parallel gather:
+   - farmer profile
+   - latest soil report
+   - latest crop plans
+   - recent chat summaries
+   - RAG context from Qdrant
+5. Fetch live weather from farmer land centroid or fallback.
+6. Build system prompt in selected language.
+7. Include:
+   - profile
+   - address
+   - land size
+   - soil report
+   - active/saved crop plans
+   - memory facts
+   - recent chat summaries
+   - weather
+   - RAG context
+   - image diagnosis if present
+8. Call OpenAI chat model.
+9. Return assistant response.
+10. Asynchronously persist:
+   - chat messages
+   - summary
+   - farming_context_tags
+   - extracted durable memory facts merged into farmer profile
+
+GET /api/chat:
+- Returns latest 10 chat history records for authenticated farmer.
+
+Durable farmer memory:
+- Stored on farmer_profiles.memory.
+- Managed by app/api/farmer/memory.
+- Categories are defined in lib/memory.ts.
+- Chat route extracts facts from conversation and merges/caps memory.
+
+================================================================================
+13. CROP PLAN CHAT ASSISTANT ARCHITECTURE
+================================================================================
+
+Backend:
+- POST /api/crop-plan/chat
+
+Purpose:
+- Dedicated assistant for modifying or explaining a selected crop plan.
+
+Flow:
+1. Authenticate farmer.
+2. Validate message, plan, history, and locale.
+3. Fetch farmer profile.
+4. Fetch current/latest soil report.
+5. Fetch farmer memory.
+6. Fetch 16-day weather forecast.
+7. Build prompt containing:
+   - current plan JSON
+   - soil report details
+   - farmer profile/land/address
+   - memory facts
+   - weather forecast
+   - language instruction
+8. Ask OpenAI to return JSON:
+   - reply
+   - updatedPlan
+9. Annotate updated plan with weather.
+10. Return reply and updatedPlan.
+
+Rules:
+- Fertilizer and micronutrient advice must use actual soil report values.
+- Missing soil data should be acknowledged, not invented.
+- Output should be in selected language.
+
+================================================================================
+14. DASHBOARD ARCHITECTURE
+================================================================================
+
+Frontend route:
+- app/dashboard/page.tsx
+
+Major components:
+- Navbar
+- WeatherWidget
+- LandMap
+- RecentChats
+- Farm Advisor chat panel
+- Profile/crop/market/scheme navigation widgets
+
+Dashboard data:
+- Authenticated farmer profile
+- Weather API response
+- Recent chat history
+- Land coordinates and land area
+
+WeatherWidget:
+- Shows current weather.
+- Shows 1-week forecast summary for the farmer.
+- Highlights thunderstorm/heavy rain risks.
+- Forecast text should be localized to selected language.
+
+LandMap:
+- Shows farmer land boundary/location.
+- Should not highlight the map when climate details overlay is open unless intentionally selected.
+
+================================================================================
+15. PROFILE PAGE ARCHITECTURE
+================================================================================
+
+Frontend route:
+- app/profile/page.tsx
+
+Major components:
+- ProfileCard
+- SoilReportUpload
+- FarmerMemorySection
+
+ProfileCard:
+- Displays:
+  - farmer name
+  - phone
+  - address
+  - land area
+  - typography
+  - preferred language
+  - land image where available
+
+SoilReportUpload:
+- Uploads soil report to /api/soil/upload.
+- Displays extraction result.
+- Can translate extraction response into selected language.
+- Extracted report is stored both in S3 and DynamoDB.
+
+FarmerMemorySection:
+- Shows durable farmer facts.
+- Allows adding and deleting farmer notes/facts.
+- Uses /api/farmer/memory.
+
+================================================================================
+16. LANDING PAGE AND GOVERNMENT SCHEMES ARCHITECTURE
+================================================================================
+
+Frontend route:
+- app/page.tsx
+
+Major components:
+- HeroSection
+- LanguageSwitcher
+- SchemesCarousel
+- Feature cards / footer sections
+
+HeroSection:
+- Brand: FarmAdvisor
+- Login and Register buttons
+- Language switcher present on landing/login experience
+- Text should reflect selected locale.
+
+SchemesCarousel:
+- Shows government scheme cards.
+- Uses localized scheme content.
+- Uses scheme images from public assets or mapped/fallback images.
+- If an image is missing, component should use a safe fallback image/card rather than a broken image.
+
+API:
+- GET /api/schemes:
+  - Scans DynamoDB government_schemes.
+- POST /api/schemes:
+  - Admin seed endpoint protected by x-admin-secret.
+
+================================================================================
+17. MARKET PRICE ARCHITECTURE
+================================================================================
+
+API:
+- GET /api/market-prices
+
+Provider:
+- Data.gov.in Agmarknet API
+
+Flow:
+1. Authenticate farmer.
+2. Query market prices by commodity and Tamil Nadu market filters.
+3. Group latest records.
+4. Return:
+   - availability
+   - average modal price
+   - trend
+   - top markets
+
+Use:
+- Can support crop plan selling window, advisor responses, and dashboard/market UI.
+
+================================================================================
+18. SPEECH ARCHITECTURE
+================================================================================
+
+Speech-to-text:
+- POST /api/speech/transcribe
+- Accepts authenticated multipart audio.
+- Uses OpenAI transcription.
+- Locale is accepted for language-specific recognition.
+
+Text-to-speech:
+- POST /api/speech/synthesize
+- Accepts text and locale.
+- Uses OpenAI speech synthesis.
+- Returns MP3 audio response.
+
+Frontend:
+- VoiceInput records farmer speech.
+- VoiceOutput plays assistant response.
+
+================================================================================
+19. SMS / NOTIFICATION ARCHITECTURE
+================================================================================
+
+API:
+- POST /api/notifications/sms
+- GET /api/notifications/sms
+
+POST flow:
+1. Authenticate farmer.
+2. Validate SMS type and message.
+3. Read farmer profile.
+4. Use profile phone number.
+5. Send SMS through AWS SNS.
+
+SMS types:
+- weather_alert
+- milestone_reminder
+- custom
+
+GET flow:
+- Admin-only placeholder weather check endpoint protected by x-admin-secret.
+- Intended for cron/scheduler to check active crop plans and weather risk.
+
+================================================================================
+20. PRESIGNED UPLOAD ARCHITECTURE
+================================================================================
+
+API:
+- POST /api/upload/presigned
+
+Flow:
+1. Authenticate farmer.
+2. Validate upload type:
+   - land
+   - soil
+3. Build S3 key from farmerId/type/filename.
+4. Return presigned S3 PUT URL and key.
+
+Use:
+- Land picture upload.
+- Soil file direct upload where needed.
+
+================================================================================
+21. IMPORTANT END-TO-END FLOWS
+================================================================================
+
+A. Register farmer:
+User -> Register Page -> /api/auth/register -> DynamoDB farmer_profiles -> Login Page
+
+B. Login farmer:
+User -> Login Page -> /api/auth/login -> DynamoDB farmer_profiles -> bcrypt compare -> JWT cookie -> Dashboard
+
+C. Dashboard weather:
+Dashboard -> /api/weather -> DynamoDB farmer profile -> land centroid -> Open-Meteo + Nominatim -> WeatherWidget
+
+D. Soil report extraction:
+Profile Page -> SoilReportUpload -> /api/soil/upload -> hash duplicate check -> S3 original upload -> OpenAI extraction -> S3 JSON upload -> DynamoDB soil_reports -> UI extraction cards
+
+E. Crop plan generation:
+Crop Plan Page -> assessment/crop input -> /api/crop-plan -> DynamoDB profile + soil + memory -> Open-Meteo forecast -> OpenAI plan JSON -> weather annotation -> DynamoDB crop_plans -> PlanTimeline + saved plan cards
+
+F. Active plan current widgets:
+Crop Plan Page -> saved plan activated -> /api/crop-plan action=activate -> DynamoDB crop_plans status=active + active_from -> UI derives current stage from active_from -> widgets use plan + soil + weather
+
+G. Advisor chat:
+ChatPanel -> /api/chat -> profile + soil + plans + memory + weather + RAG + optional image diagnosis -> OpenAI -> response -> async chat_history + farmer memory update
+
+H. Crop plan assistant:
+PlanChatPanel -> /api/crop-plan/chat -> selected plan + soil + weather + memory -> OpenAI JSON -> updated plan -> UI
+
+I. Language change:
+LanguageSwitcher -> selected locale -> next-intl UI messages update -> dynamic content sent to /api/translate -> translated crop/soil/current details rendered
+
+================================================================================
+22. ENVIRONMENT VARIABLES
+================================================================================
+
+Core:
+- OPENAI_API_KEY
+- OPENAI_CHAT_MODEL
+- JWT_SECRET
+- COOKIE_SECURE
+
+AWS:
+- AWS_REGION
+- AWS_ACCESS_KEY_ID
+- AWS_SECRET_ACCESS_KEY
+- S3_BUCKET_MEDIA
+
+Qdrant:
+- QDRANT_URL
+- QDRANT_COLLECTION
+
+Admin / data:
+- ADMIN_SECRET
+- DATA_GOV_IN_API_KEY
+
+Optional speech/AWS wrappers:
+- AWS Polly and Transcribe clients use AWS credentials/region.
+
+================================================================================
+23. SECURITY AND OPERATIONAL NOTES
+================================================================================
+
+Authentication:
+- Protected routes rely on auth_token cookie.
+- Password hash is never returned from profile API.
+- Admin seed and scheduler-style endpoints require ADMIN_SECRET.
+
+Data isolation:
+- Farmer-specific data is keyed by farmer_id.
+- S3 keys are namespaced by farmer_id.
+- API routes should always derive farmerId from JWT, not client input.
+
+LLM safety:
+- Prompts require not inventing values.
+- Soil report values must be used when available.
+- Missing soil report must be acknowledged.
+- JSON mode is used for structured outputs.
+- Translation route preserves technical values.
+
+Reliability:
+- RAG retrieval fails gracefully if Qdrant is unavailable.
+- Crop plan generation has fallback plan builder if OpenAI fails.
+- Soil upload has duplicate detection by file hash.
+- Weather API responses are cached with Next.js revalidate settings.
+
+Potential future improvements:
+- Add scheduled job to scan active crop plans and weather, then send SNS alerts.
+- Add stricter file size validation on soil upload API route.
+- Add DynamoDB GSIs for current soil report and active crop plans if scale increases.
+- Add persistent translated variants for crop plans and soil reports to reduce repeat translation calls.
+- Add observability logs/metrics for OpenAI, S3, DynamoDB, and weather failures.
+
+================================================================================
+24. DIAGRAM INSTRUCTIONS FOR CLAUDE
+================================================================================
+
+Create an architecture diagram with these layers:
+
+Layer 1 - Client Browser:
+- Landing Page
+- Login/Register
+- Dashboard
+- Crop Plan Page
+- Profile Page
+- Chat UI
+- Language Switcher
+- Voice Input/Output
+
+Layer 2 - Next.js App Router:
+- App pages
+- Middleware auth guard
+- next-intl message loading
+- Tailwind/React components
+
+Layer 3 - API Routes:
+- Auth API
+- Farmer Profile API
+- Farmer Memory API
+- Chat API
+- Crop Plan API
+- Crop Plan Chat API
+- Soil Upload API
+- Soil GET API
+- Weather API
+- Market Prices API
+- Translate API
+- Speech APIs
+- Presigned Upload API
+- SMS API
+- Schemes API
+
+Layer 4 - Internal Libraries:
+- lib/auth
+- lib/aws/dynamodb
+- lib/aws/s3
+- lib/aws/sns
+- lib/ai/openai
+- lib/ai/rag
+- lib/ai/vectorstore
+- lib/weather
+- lib/crop-plan-weather
+- lib/memory
+- lib/crop-doctor
+
+Layer 5 - External Services:
+- OpenAI
+- AWS DynamoDB
+- AWS S3
+- AWS SNS
+- Qdrant
+- Open-Meteo
+- Nominatim
+- Data.gov.in Agmarknet
+
+Layer 6 - Data Stores:
+- farmer_profiles
+- chat_history
+- crop_plans
+- soil_reports
+- government_schemes
+- S3 media bucket
+- Qdrant farm_docs collection
+
+Recommended diagram edges:
+- Browser -> Middleware -> protected pages
+- Login/Register pages -> Auth API -> DynamoDB farmer_profiles
+- Dashboard -> Weather API -> Open-Meteo/Nominatim
+- Dashboard -> Chat API -> OpenAI/Qdrant/DynamoDB/Open-Meteo
+- Profile -> Soil Upload API -> S3 + OpenAI + DynamoDB soil_reports
+- Crop Plan Page -> Crop Plan API -> OpenAI + DynamoDB + Open-Meteo
+- Crop Plan Page -> Translate API -> OpenAI
+- Language Switcher -> next-intl messages and Translate API
+- Soil reports -> Crop Plan API and Chat API
+- Farmer memory -> Chat API and Crop Plan API
+- Active crop plans -> Current Plan Widgets and SMS scheduler concept
+- SchemesCarousel -> Schemes API -> DynamoDB government_schemes
+
+Suggested title:
+"FarmAdvisor Multilingual AI Farming Advisory Architecture"
+
+Suggested subtitle:
+"Next.js + OpenAI + AWS DynamoDB/S3/SNS + Qdrant + Open-Meteo for personalized crop, soil, weather, and scheme advisory"
+

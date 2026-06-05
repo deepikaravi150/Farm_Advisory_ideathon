@@ -1,0 +1,1224 @@
+FarmAdvisor - Full App Screen and Widget Input/Process/Output Flow
+Generated on: 2026-06-05
+Purpose: Human-readable reference explaining every main page and widget from login through the final app screens. Each section says what input the widget takes, where the input comes from, which file/API/data document it refers to, how it processes the data, and what output the farmer sees.
+
+================================================================================
+0. GLOBAL RULES USED BY THE WHOLE APP
+================================================================================
+
+Authentication source:
+- Browser cookie: auth_token
+- Created by: app/api/auth/login/route.ts
+- Verified by: lib/auth.ts
+- Protected by: middleware.ts
+- Used by almost every private page and API route to identify farmer_id.
+
+Language source:
+- Locale values: en, hi, ta
+- Static text source: public/locales/en/common.json, public/locales/hi/common.json, public/locales/ta/common.json
+- Runtime language switcher: components/layout/LanguageSwitcher.tsx
+- Dynamic translation API: app/api/translate/route.ts
+- Output expectation: UI labels, LLM responses, crop plans, soil summaries, current widgets, weather guidance, and chat text should follow selected language.
+
+Main farmer data source:
+- DynamoDB table: farmer_profiles
+- Helper file: lib/aws/dynamodb.ts
+- Profile API: app/api/farmer/profile/route.ts
+- Main fields used across app:
+  - farmer_id
+  - name
+  - phone
+  - address
+  - land_coordinates
+  - typography
+  - land_area_acres
+  - land_picture_s3_key
+  - preferred_language
+  - memory
+
+Main AI source:
+- OpenAI helpers: lib/ai/openai.ts
+- RAG helper: lib/ai/rag.ts
+- Vector store: lib/ai/vectorstore.ts
+- Model env: OPENAI_CHAT_MODEL
+- API key env: OPENAI_API_KEY
+
+Main weather source:
+- Weather helper: lib/weather.ts
+- Weather API: app/api/weather/route.ts
+- External API: Open-Meteo
+- Reverse geocoding: Nominatim
+- Coordinates source: farmer_profiles.land_coordinates
+
+Main storage source:
+- DynamoDB tables:
+  - farmer_profiles
+  - chat_history
+  - crop_plans
+  - soil_reports
+  - government_schemes
+- S3 media bucket:
+  - S3_BUCKET_MEDIA
+  - used for land images, soil PDFs/images, soil extraction JSON, and crop images where uploaded.
+
+================================================================================
+1. LOGIN PAGE
+================================================================================
+
+Page file:
+- app/(auth)/login/page.tsx
+
+Main widgets:
+- Language switcher
+- Phone input
+- Password input with show/hide toggle
+- Login button
+- Error box
+- Register link
+
+1.1 Language Switcher
+Input:
+- User chooses language: English, Hindi, or Tamil.
+Source:
+- components/layout/LanguageSwitcher.tsx
+- Locale messages in public/locales/*/common.json
+Processing:
+- Updates app locale cookie/client state.
+- Re-renders text through next-intl.
+Output:
+- Login page labels and placeholders change language.
+
+1.2 Phone Input
+Input:
+- Farmer enters 10 digit phone number.
+Source:
+- User typing in login form.
+Processing:
+- Stored in React state as phone.
+- Sent to POST /api/auth/login.
+Output:
+- Phone becomes the lookup key for farmer account.
+
+1.3 Password Input
+Input:
+- Farmer enters password.
+Source:
+- User typing in login form.
+Processing:
+- Stored in React state as password.
+- Show/hide button only changes input type between password and text.
+- Sent to POST /api/auth/login.
+Output:
+- Password is validated server-side against bcrypt hash.
+
+1.4 Login Button
+Input:
+- phone
+- password
+Source:
+- Login form state.
+Processing:
+- Calls app/api/auth/login/route.ts.
+- API validates input with Zod.
+- API looks up farmer by phone using app/api/auth/farmers.ts.
+- DynamoDB query uses phone-index if available, with scan fallback.
+- bcrypt compares password with password_hash.
+- JWT is created by lib/auth.ts.
+- auth_token cookie is set.
+Output:
+- Success: user goes to /dashboard.
+- Failure: error message is displayed.
+
+1.5 Error Box
+Input:
+- API error or network error.
+Source:
+- Login API response.
+Processing:
+- React state error is set.
+Output:
+- Farmer sees invalid credentials, failed login, or network error.
+
+================================================================================
+2. REGISTER PAGE
+================================================================================
+
+Page file:
+- app/(auth)/register/page.tsx
+
+Main widgets:
+- Step indicator
+- FarmerDetailsForm
+- LandMapSelector
+- Password and confirm password fields
+- Create account button
+- Login link
+
+2.1 Step Indicator
+Input:
+- Current step: details, map, password.
+Source:
+- Register page React state.
+Processing:
+- stepIndex decides active/completed step.
+Output:
+- Farmer sees progress through account creation.
+
+2.2 FarmerDetailsForm
+File:
+- components/register/FarmerDetailsForm.tsx
+Input:
+- farmerId
+- name
+- phone
+- address
+- typography / land type
+- landAreaAcres
+Source:
+- Farmer form fields.
+- Labels and validation messages from next-intl register namespace.
+Processing:
+- react-hook-form collects fields.
+- Zod validates:
+  - farmerId required
+  - name minimum length
+  - phone must be 10 digits
+  - address minimum length
+  - landAreaAcres positive number
+- On success, sends data back to register page through onNext.
+Output:
+- Valid form data is saved in RegisterPage state.
+- UI advances to map step.
+
+2.3 LandMapSelector
+File:
+- components/register/LandMapSelector.tsx
+Input:
+- initialAddress from FarmerDetailsForm.
+- Farmer search query.
+- Farmer clicks on map points.
+Source:
+- Address from register form.
+- Nominatim search API for geocoding.
+- Leaflet map click events.
+- ESRI satellite and label tile layers.
+Processing:
+- If address is provided, it tries to geocode address + Tamil Nadu India.
+- Pans/zooms map to search result.
+- Farmer clicks points to create land boundary.
+- Double click or Done completes polygon.
+- Requires at least 3 points before moving forward.
+- onChange returns coordinates as [{lat,lng}].
+Output:
+- landCoordinates array is saved in RegisterPage state.
+- Farmer sees drawn land polygon on satellite map.
+
+2.4 Password Step
+Input:
+- password
+- confirmPassword
+Source:
+- Farmer typing.
+Processing:
+- Client checks password match.
+- Client checks password length minimum 8.
+- Show/hide toggles input type.
+Output:
+- Valid password is included in registration payload.
+
+2.5 Create Account Button
+Input:
+- formData from FarmerDetailsForm
+- coords from LandMapSelector
+- password
+Source:
+- Register page state.
+Processing:
+- Calls POST /api/auth/register.
+- API validates body.
+- API checks duplicate farmer_id and phone.
+- Password is hashed.
+- Profile is stored in DynamoDB farmer_profiles.
+Output:
+- Success: redirects to /login?registered=1.
+- Failure: error shown.
+
+================================================================================
+3. LANDING PAGE
+================================================================================
+
+Page file:
+- app/page.tsx
+
+Main widgets:
+- HeroSection
+- Feature cards
+- SchemesCarousel
+- Footer
+
+3.1 HeroSection
+File:
+- components/landing/HeroSection.tsx
+Input:
+- Selected locale.
+Source:
+- next-intl landing translations.
+- LanguageSwitcher.
+Processing:
+- Reads translated title/subtitle/button labels.
+- Shows Login and Register navigation buttons.
+Output:
+- Public first screen with app name, value message, language switching, and auth navigation.
+
+3.2 Feature Cards
+Input:
+- Feature translation strings:
+  - feature1Title/Desc
+  - feature2Title/Desc
+  - feature3Title/Desc
+  - feature4Title/Desc
+Source:
+- public/locales/*/common.json under landing namespace.
+Processing:
+- app/page.tsx maps features to icon cards.
+Output:
+- Farmer sees app capabilities in selected language.
+
+3.3 SchemesCarousel
+File:
+- components/landing/SchemesCarousel.tsx
+Input:
+- Government scheme data and/or local scheme card definitions.
+- Selected locale.
+- Scheme image mapping/fallback images.
+Source:
+- components/landing/SchemesCarousel.tsx
+- GET /api/schemes when dynamic data is used.
+- DynamoDB table government_schemes through app/api/schemes/route.ts.
+- public assets for scheme images.
+Processing:
+- Localizes scheme title/description.
+- Selects image by scheme mapping.
+- Uses fallback display if image is missing.
+- Carousel scrolls through scheme cards.
+Output:
+- Public government schemes section in selected language with images and descriptions.
+
+================================================================================
+4. DASHBOARD PAGE
+================================================================================
+
+Page file:
+- app/dashboard/page.tsx
+
+Server-side inputs loaded before rendering:
+- auth_token cookie
+- farmer profile from DynamoDB farmer_profiles
+- land coordinates from profile
+- current weather and 16-day forecast from lib/weather.ts
+- latest soil report from DynamoDB soil_reports
+- latest 10 crop plans from DynamoDB crop_plans
+- active plan preferred, otherwise most recent plan
+- selected locale from next-intl
+
+Main widgets:
+- Navbar
+- Greeting/date
+- TodayActionBanner
+- WeatherWidget
+- CropPlanNextStepWidget
+- SoilHealthWidget
+- MarketPricesWidget
+- LandMapWidget
+- ChatSummaryWidget
+- ChatPanel
+
+4.1 Navbar
+File:
+- components/layout/Navbar.tsx
+Input:
+- farmerName passed from page.
+- selected locale.
+Source:
+- JWT payload or farmer profile.
+- next-intl messages.
+Processing:
+- Shows app navigation links and farmer name.
+Output:
+- Top navigation for Dashboard, Crop Plan, Profile, etc.
+
+4.2 Greeting and Date
+Input:
+- farmer.name
+- current date on server render
+- selected locale
+Source:
+- JWT token payload and next-intl locale.
+Processing:
+- Uses dashboard translation greeting.
+- Formats date with en-IN, hi-IN, or ta-IN.
+Output:
+- "Good day, <name>" and localized date.
+
+4.3 TodayActionBanner
+File:
+- components/dashboard/TodayActionBanner.tsx
+Input:
+- current weather
+- forecast array
+- selected active/latest plan
+Source:
+- app/dashboard/page.tsx passes data from lib/weather.ts and crop_plans.
+- lib/farm-advice.ts provides weatherVerdict and nextStepFromPlan.
+Processing:
+- If no weather/forecast, hides itself.
+- Computes weather verdict from forecast.
+- Computes next active/upcoming crop step from plan using current date.
+- Weather urgent condition wins over crop task.
+- Otherwise active crop task or upcoming task becomes headline.
+Output:
+- A single "today's plan" banner:
+  - urgent weather warning, or
+  - crop stage action, or
+  - general weather suggestion.
+- Link to /crop-plan when plan exists.
+
+4.4 WeatherWidget
+File:
+- components/dashboard/WeatherWidget.tsx
+Input:
+- current weather
+- forecast array
+- selected locale
+Source:
+- app/dashboard/page.tsx
+- lib/weather.ts
+- lib/farm-advice.ts
+Processing:
+- Uses weatherVerdict for overall weekly conclusion.
+- Uses currentWeatherFlags for heat/humidity/wind flags.
+- Shows only first 7 forecast days.
+- Farmer can click a forecast day.
+- Day modal calculates field risk:
+  - High for thunderstorm, heavy rain, or high heat.
+  - Medium for moderate rain/drizzle/heat.
+  - Low otherwise.
+- Day guidance is generated from description/rain/temp.
+Output:
+- Current weather hero card.
+- Today's action recommendation.
+- 7-day forecast strip.
+- Detailed overlay for selected day with temperature, rainfall, field risk, and guidance.
+
+4.5 CropPlanNextStepWidget
+File:
+- components/dashboard/CropPlanNextStepWidget.tsx
+Input:
+- active/latest crop plan or null.
+Source:
+- crop_plans DynamoDB table via dashboard page.
+- lib/farm-advice.ts nextStepFromPlan.
+Processing:
+- If no plan, shows create plan CTA.
+- If plan exists, computes active or upcoming step using today's date.
+- Displays crop name, step label, date range, task text, and alert advice.
+Output:
+- "Your Crop Plan" card showing next/current farm action.
+- Link to /crop-plan.
+
+4.6 SoilHealthWidget
+File:
+- components/dashboard/SoilHealthWidget.tsx
+Input:
+- latest soil report summary or null.
+Source:
+- DynamoDB soil_reports through dashboard page.
+Processing:
+- If no soil report, shows upload CTA to /profile.
+- If soil exists:
+  - Displays pH, N, P, K.
+  - Converts low/medium/high to selected language.
+  - Shows plain summary or first key finding.
+Output:
+- Soil health summary card.
+- Link to profile details.
+
+4.7 MarketPricesWidget
+File:
+- components/dashboard/MarketPricesWidget.tsx
+Input:
+- defaultCommodity from active/latest crop plan if crop name is plain English.
+- User-entered commodity search.
+- State default Tamil Nadu.
+Source:
+- Crop plan crop_name.
+- GET /api/market-prices.
+- External Data.gov.in Agmarknet API.
+Processing:
+- Loads price data for commodity/state.
+- User can search another English crop name.
+- Quick picks: Tomato, Onion, Rice, Brinjal, Banana.
+- Shows average modal price, trend, and markets.
+Output:
+- Market price card with latest modal prices per quintal.
+- Shows no-data message when API has no records.
+
+4.8 LandMapWidget
+File:
+- components/dashboard/LandMapWidget.tsx
+Input:
+- coordinates
+- landArea
+- optional s3ImageKey, though current component mainly uses coordinates and landArea.
+Source:
+- farmer_profiles.land_coordinates
+- farmer_profiles.land_area_acres
+- ESRI tile layers.
+Processing:
+- If no coordinates, shows no-coordinates state.
+- Calculates center as average of coordinate points.
+- Displays static Leaflet satellite map.
+- Draws polygon from land coordinates.
+- Disables map dragging/zooming interactions.
+Output:
+- "Your Land" map card with polygon and acreage.
+
+4.9 ChatSummaryWidget
+File:
+- components/dashboard/ChatSummaryWidget.tsx
+Input:
+- Latest chat history.
+Source:
+- GET /api/chat.
+- DynamoDB chat_history.
+Processing:
+- Fetches chats client-side.
+- Uses first 3 chat records.
+- Displays summary, up to 3 tags, and formatted timestamp.
+Output:
+- Recent chats widget.
+
+4.10 ChatPanel
+File:
+- components/chatbot/ChatPanel.tsx
+Input:
+- User typed question.
+- Optional crop image.
+- Optional voice transcript.
+- Selected locale.
+- Last 6 local messages as history.
+Source:
+- User input UI.
+- VoiceInput component.
+- Camera/file input.
+- POST /api/chat.
+Processing:
+- For text-only message:
+  - Sends JSON to /api/chat with message, locale, history.
+- For image:
+  - Sends multipart form with file, message, locale, history.
+- API gathers profile, soil, crop plans, memory, recent chats, weather, RAG, and image diagnosis.
+- OpenAI creates response.
+- Chat route saves chat summary/tags and memory asynchronously.
+- VoiceOutput can synthesize assistant reply.
+Output:
+- Assistant advice in selected language.
+- Optional spoken output.
+- Chat is later visible in recent chats/history.
+
+================================================================================
+5. CHAT DETAIL PAGE
+================================================================================
+
+Page file:
+- app/chat/[id]/page.tsx
+
+Input:
+- chat id from URL params.
+- auth_token cookie.
+Source:
+- URL /chat/<id>.
+- DynamoDB chat_history queried by farmer_id.
+Processing:
+- Loads latest 25 chats for farmer.
+- Finds chat where chat_id equals route param.
+- Redirects to /dashboard if not found.
+- Formats timestamp with lib/utils.ts formatDate.
+Output:
+- Full chat conversation:
+  - chat summary as title
+  - date
+  - context tags
+  - user and assistant messages
+  - back to dashboard link
+
+================================================================================
+6. PROFILE PAGE
+================================================================================
+
+Page file:
+- app/profile/page.tsx
+
+Client-side initial loading:
+- GET /api/farmer/profile
+- Stores profile in React state.
+
+Main widgets:
+- Navbar
+- ProfileCard
+- SoilReportUpload
+- FarmerMemorySection
+
+6.1 ProfileCard
+File:
+- components/profile/ProfileCard.tsx
+Input:
+- profile object:
+  - farmer_id
+  - name
+  - phone
+  - address
+  - land_area_acres
+  - typography
+  - preferred_language
+  - created_at
+Source:
+- GET /api/farmer/profile.
+Processing:
+- Displays profile fields.
+- Edit mode allows changing:
+  - name
+  - typography
+  - landAreaAcres
+  - preferredLanguage
+- Save calls PATCH /api/farmer/profile.
+- API updates DynamoDB farmer_profiles.
+Output:
+- Farmer profile card.
+- Updated profile after save.
+
+6.2 SoilReportUpload
+File:
+- components/profile/SoilReportUpload.tsx
+Input:
+- PDF/image soil report file.
+- selected locale.
+Source:
+- Farmer file upload.
+- useDropzone accepts image/* and PDF.
+- Max client file size: 10 MB.
+Processing:
+- Sends multipart form to POST /api/soil/upload with file and locale.
+- API:
+  - authenticates farmer
+  - computes file hash
+  - checks duplicate soil report for same farmer
+  - uploads original file to S3 if new
+  - extracts soil values with OpenAI
+  - uploads extracted JSON to S3
+  - stores normalized result in DynamoDB soil_reports
+  - marks report as current
+- Component then calls /api/translate with kind soil_report whenever locale/result changes.
+- Translation preserves technical values and translates farmer-facing text.
+Output:
+- Dropzone/analyzing UI.
+- Error box if upload/extraction fails.
+- Soil result card:
+  - extracted title
+  - lab name if present
+  - what this means
+  - key findings
+  - pH
+  - nitrogen
+  - phosphorus
+  - potassium
+  - AI recommendations
+
+6.3 FarmerMemorySection
+File:
+- components/profile/FarmerMemorySection.tsx
+Input:
+- initial profile.memory
+- manual note text
+- selected category
+Source:
+- profile.memory from GET /api/farmer/profile.
+- GET /api/farmer/memory refresh.
+- POST /api/farmer/memory add.
+- DELETE /api/farmer/memory?id=<id> delete.
+Processing:
+- Groups facts by category:
+  - crop
+  - land
+  - irrigation
+  - soil
+  - pest
+  - preference
+  - other
+- Manual add creates fact with id, text, category, updatedAt.
+- Delete uses optimistic UI and reverts on failure.
+- Chat assistant can also auto-extract facts into memory.
+Output:
+- "What we know about your farm" grouped notes.
+- Add/remove memory facts.
+
+================================================================================
+7. CROP PLAN PAGE
+================================================================================
+
+Page file:
+- app/crop-plan/page.tsx
+
+Main data loaded:
+- GET /api/crop-plan for saved plans.
+- GET /api/soil for current/latest soil report.
+- Selected locale.
+- Translation API for display plans/current details.
+
+Main widgets/sections:
+- Navbar
+- New plan button
+- StateAssessmentModal
+- Saved Plans strip
+- CurrentStageSection
+- CropDetailsSection
+- LandStateSection
+- Selected Plan Details
+- Current selected active plan widgets
+- PlanTimeline
+- Storage notes
+- PlanChatPanel
+- CropSuggestions
+
+7.1 New Plan Button
+Input:
+- Farmer click.
+Source:
+- Crop plan page UI.
+Processing:
+- Opens StateAssessmentModal.
+Output:
+- Farmer starts crop planning flow.
+
+7.2 StateAssessmentModal
+File:
+- components/crop-plan/StateAssessmentModal.tsx
+Input:
+- Farmer situation:
+  - planning_unsure
+  - planning_specific
+  - mid_grow
+- cropName
+- experience
+- grownBefore
+- previousCrops
+- lastGrownWhen
+- lastHarvest
+- pastIssues
+- irrigation
+- fertilizers
+- startDate for planning states
+- info for mid_grow
+Source:
+- Farmer questionnaire answers.
+- Translation strings from assessment namespace.
+Processing:
+- Dynamic questions:
+  - previous crop questions show only if grownBefore is Yes.
+- Stable English option values are sent to LLM.
+- Display labels are localized.
+- Final submit calls crop-plan page onAssessmentSubmit.
+Output:
+- AssessmentPayload and farmerState used for plan generation.
+
+7.3 Crop Plan Generation
+API:
+- POST /api/crop-plan
+Input:
+- farmerState
+- cropName
+- startDate/current crop info
+- assessment answers
+- locale
+Source:
+- StateAssessmentModal.
+- Farmer profile from DynamoDB.
+- Current soil report from DynamoDB.
+- Farmer memory from profile.
+- Weather forecast from Open-Meteo.
+Processing:
+- API builds soil context:
+  - pH, EC, organic carbon, N/P/K, micronutrients, recommendations.
+- API builds profile context:
+  - address, land area, land type, coordinates.
+- API builds assessment context.
+- API builds weather forecast prompt.
+- OpenAI generates structured crop plan JSON.
+- Plan is normalized.
+- Weather warnings are added to milestones.
+- Plan is stored in DynamoDB crop_plans.
+Output:
+- CropPlan object:
+  - cropName
+  - startDate
+  - milestones
+  - totalBudgetEstimate
+  - harvestDate
+  - sellWindow
+  - storageNotes
+  - weatherAlerts
+
+7.4 Saved Plans Strip
+Input:
+- savedPlans array.
+- activePlan selected in UI.
+Source:
+- GET /api/crop-plan.
+- DynamoDB crop_plans.
+Processing:
+- Converts DynamoDB fields to UI shape:
+  - plan_id -> planId
+  - crop_name -> cropName
+  - start_date -> startDate
+  - budget_estimate -> totalBudgetEstimate
+  - active_from -> activeFrom
+- Farmer can:
+  - select a saved plan
+  - save current generated plan
+  - delete a plan
+  - make plan current/active
+  - make active plan inactive
+- Activate/deactivate calls POST /api/crop-plan with action.
+- Delete calls DELETE /api/crop-plan?planId=...
+Output:
+- Horizontal saved plan cards.
+- Status badge: current/active or planned.
+- Action button changes active/inactive state.
+
+7.5 Active Plan Logic
+Input:
+- saved plan status
+- active_from
+- plan startDate
+- milestone date/endDate/duration.
+Source:
+- DynamoDB crop_plans.
+- UI helper functions in app/crop-plan/page.tsx.
+Processing:
+- Multiple plans can have status active.
+- Current widgets display when at least one active/selected current plan exists.
+- Stage dates are shifted from active_from.
+- If a plan is activated later, milestone dates are recalculated relative to active_from.
+- Stage status can be:
+  - done
+  - active
+  - pending
+  - alert
+Output:
+- Correct current stage and active plan UI based on activation date.
+
+7.6 CurrentStageSection
+File:
+- components/crop-plan/CurrentStageSection.tsx
+Input:
+- cropName
+- stageProgress
+- currentId
+- insight summary/water/action
+- risk and riskLevel
+- locale
+Source:
+- app/crop-plan/page.tsx derives from selected/active plan.
+- Plan milestones and weather warnings.
+Processing:
+- Shows progress through milestones.
+- Highlights current stage.
+- Displays localized risk and advice.
+Output:
+- At-a-glance current stage card for active crop.
+
+7.7 CropDetailsSection
+File:
+- components/crop-plan/CropDetailsSection.tsx
+Input:
+- cropName
+- crop info from lib/crop-info.ts
+- fallback plan values:
+  - harvestDate
+  - sellWindow
+  - budget
+  - stages
+- locale
+Source:
+- getCropInfo(cropName)
+- active/display plan.
+Processing:
+- Merges known crop metadata with plan fallback details.
+- Localizes labels.
+Output:
+- Crop information card with plan/crop details.
+
+7.8 LandStateSection
+File:
+- components/crop-plan/LandStateSection.tsx
+Input:
+- soil data
+- crop info
+- cropName
+- locale
+Source:
+- GET /api/soil.
+- lib/crop-info.ts.
+Processing:
+- Reads soil report values such as pH, N/P/K, organic carbon, EC, micronutrients.
+- Combines with crop needs where available.
+- Localizes visible text.
+Output:
+- Land/current requirement card explaining soil/land condition for crop.
+
+7.9 Selected Plan Details Header
+Input:
+- selected plan/display plan.
+- pendingInputDetails.
+Source:
+- Generated plan or saved plan.
+Processing:
+- Shows selected plan title.
+- If unsaved generated plan exists, shows save button.
+Output:
+- "Selected Plan Details" section and save action.
+
+7.10 Current Selected Active Plan Widgets
+Input:
+- selected active plan.
+- current milestone.
+- currentPlanDisplayData.
+- inputDetails from assessment.
+- plan milestone text.
+- weather lines.
+- fertilizer fields from input details and plan/soil.
+Source:
+- app/crop-plan/page.tsx extractCurrentPlanData.
+- selected plan milestones.
+- input_details stored in crop_plans.
+- latest soil report.
+Processing:
+- Only shown when selected plan is current/active.
+- Builds:
+  - current stage card
+  - stage details card
+  - crop info widget
+  - land requirements widget
+- Splits current milestone tasks into stage lines.
+- Extracts water lines from weatherRequirement/weatherSummary/alertAdvice.
+- Extracts inputs/fertilizer/manure/pesticide lines from plan and inputDetails.
+- Localizes dynamic current plan display through /api/translate kind current_plan_details.
+Output:
+- Current stage starting date.
+- Risk badge.
+- Stage task list.
+- Water from plan.
+- Inputs from plan.
+- Crop info.
+- Land/weather/current requirements.
+
+7.11 PlanTimeline
+File:
+- components/crop-plan/PlanTimeline.tsx
+Input:
+- localizedDisplayPlan
+Source:
+- active/generated plan.
+- /api/translate kind crop_plan if locale is not English.
+Processing:
+- Renders each milestone:
+  - label
+  - date/endDate
+  - duration
+  - tasks
+  - estimated cost
+  - weather requirement
+  - weather summary
+  - alerts
+Output:
+- Full crop plan timeline from first stage to harvest/selling.
+
+7.12 Storage Notes
+Input:
+- displayPlan.storageNotes.
+Source:
+- OpenAI-generated crop plan or saved DynamoDB crop_plans.
+Processing:
+- Shows only if storageNotes exists.
+Output:
+- Storage/selling guidance below timeline.
+
+7.13 PlanChatPanel
+File:
+- components/crop-plan/PlanChatPanel.tsx
+Input:
+- selected plan
+- user message
+- voice transcript
+- selected locale
+- last 6 plan chat messages
+Source:
+- User input.
+- POST /api/crop-plan/chat.
+Processing:
+- Sends message, locale, plan, and history.
+- API fetches profile, soil report, memory, and weather.
+- OpenAI returns:
+  - reply
+  - updatedPlan
+- If updatedPlan exists, UI shows Apply/Dismiss.
+- Apply calls onApply and replaces current plan in UI.
+Output:
+- Plan assistant reply.
+- Optional proposed plan modification.
+- Voice output option.
+
+7.14 CropSuggestions
+File:
+- components/crop-plan/CropSuggestions.tsx
+Input:
+- suggestions array.
+Source:
+- Crop plan API response when farmer is unsure or suggestions are generated.
+Processing:
+- Displays suggested crops and lets farmer select one.
+Output:
+- Farmer can pick a suggested crop to create/view plan.
+
+================================================================================
+8. CHAT API PROCESSING DETAILS
+================================================================================
+
+API file:
+- app/api/chat/route.ts
+
+Input:
+- message
+- locale
+- history
+- optional crop image file
+
+Sources used inside API:
+- farmer profile from DynamoDB farmer_profiles
+- latest soil report from DynamoDB soil_reports
+- latest crop plans from DynamoDB crop_plans
+- recent chat summaries from DynamoDB chat_history
+- RAG context from Qdrant via lib/ai/rag.ts
+- current weather and forecast via lib/weather.ts
+- crop image diagnosis via lib/crop-doctor.ts and OpenAI vision
+- farmer memory from profile.memory
+
+Processing:
+- Builds advisor system prompt with all context.
+- Uses selected language instruction.
+- Calls OpenAI chat model.
+- Returns reply.
+- In background:
+  - summarizes conversation
+  - extracts farming context tags
+  - extracts durable memory facts
+  - saves chat_history
+  - updates farmer_profiles.memory
+
+Output:
+- JSON reply to ChatPanel.
+- Persistent chat history and farmer memory.
+
+================================================================================
+9. SOIL API PROCESSING DETAILS
+================================================================================
+
+API files:
+- app/api/soil/upload/route.ts
+- app/api/soil/route.ts
+
+Upload input:
+- file
+- locale
+- auth_token cookie
+
+Sources:
+- S3 media bucket
+- DynamoDB soil_reports
+- OpenAI document/image extraction
+- pdf-parse fallback for PDFs
+
+Processing:
+- Authenticates farmer.
+- Reads file buffer.
+- Computes SHA-256 hash.
+- Checks existing reports for duplicate file_hash.
+- If duplicate, reuses stored report and marks it current.
+- If new:
+  - uploads original file to S3
+  - extracts structured JSON through OpenAI
+  - uploads extraction JSON to S3
+  - saves normalized fields in DynamoDB
+
+GET /api/soil:
+- Authenticates farmer.
+- Queries latest/current soil report.
+- Returns normalized soilData.
+
+Output:
+- SoilData object used by:
+  - Profile soil result card
+  - Dashboard soil health widget
+  - Crop plan generation
+  - Crop current land/fertilizer widgets
+  - Chat advisor prompt
+  - Crop plan assistant prompt
+
+================================================================================
+10. WEATHER API PROCESSING DETAILS
+================================================================================
+
+API file:
+- app/api/weather/route.ts
+
+Input:
+- auth_token cookie.
+Source:
+- farmer profile land_coordinates.
+- Open-Meteo weather API.
+- Nominatim reverse geocode.
+Processing:
+- Gets farmer land centroid using lib/utils.ts extractCentroid.
+- Falls back to Chennai if no coordinates.
+- Fetches current weather and 16-day forecast.
+Output:
+- Weather data used by:
+  - Dashboard WeatherWidget
+  - TodayActionBanner
+  - Crop plan generation
+  - Crop plan weather milestone annotations
+  - Chat advisor context
+
+================================================================================
+11. MARKET PRICE API PROCESSING DETAILS
+================================================================================
+
+API file:
+- app/api/market-prices/route.ts
+
+Input:
+- commodity
+- state
+- auth_token cookie
+Source:
+- Data.gov.in Agmarknet API.
+- DATA_GOV_IN_API_KEY.
+Processing:
+- Fetches recent market records.
+- Filters/group records.
+- Computes avg modal price.
+- Determines trend when possible.
+Output:
+- MarketPricesWidget displays average modal price, top markets, and trend.
+
+================================================================================
+12. SPEECH AND VOICE FLOW
+================================================================================
+
+Files:
+- components/chatbot/VoiceInput.tsx
+- components/chatbot/VoiceOutput.tsx
+- app/api/speech/transcribe/route.ts
+- app/api/speech/synthesize/route.ts
+
+VoiceInput input:
+- Farmer microphone audio.
+Source:
+- Browser MediaRecorder/recording component.
+Processing:
+- Sends audio to /api/speech/transcribe.
+- API uses OpenAI transcription.
+Output:
+- Text transcript inserted into ChatPanel or PlanChatPanel and sent as message.
+
+VoiceOutput input:
+- Assistant text response.
+Source:
+- ChatPanel or PlanChatPanel assistant message.
+Processing:
+- Sends text and locale to /api/speech/synthesize.
+- API uses OpenAI TTS.
+Output:
+- MP3 audio played in browser.
+
+================================================================================
+13. NOTIFICATION FLOW
+================================================================================
+
+API file:
+- app/api/notifications/sms/route.ts
+
+Input:
+- type: weather_alert, milestone_reminder, or custom
+- message max 160 chars
+- auth_token cookie
+Source:
+- Farmer phone from DynamoDB farmer_profiles.
+- AWS SNS helper lib/aws/sns.ts.
+Processing:
+- Authenticates farmer.
+- Reads profile.
+- Sends SMS through the correct helper:
+  - sendWeatherAlert
+  - sendMilestoneReminder
+  - sendSMS
+Output:
+- Farmer receives SMS.
+- API returns success true.
+
+================================================================================
+14. FINAL HUMAN SUMMARY: WHAT EACH PAGE OUTPUTS
+================================================================================
+
+Login page output:
+- Authenticated farmer session cookie and redirect to dashboard.
+
+Register page output:
+- New farmer profile in DynamoDB with land boundary and account password hash.
+
+Landing page output:
+- Public app explanation, language switching, and scheme cards.
+
+Dashboard output:
+- One-screen farm status:
+  - today action
+  - weather verdict
+  - next crop step
+  - soil health
+  - market prices
+  - land map
+  - recent chats
+  - full advisor chat
+
+Profile output:
+- Farmer profile details and editable fields.
+- Uploaded/extracted soil report.
+- Durable farmer memory facts.
+
+Crop plan output:
+- Saved plans.
+- Active/inactive plan management.
+- Current stage and current crop requirement widgets.
+- Full milestone timeline.
+- Soil/weather/profile-aware crop planning.
+- Plan assistant capable of modifying plan.
+
+Chat detail output:
+- Complete saved conversation with context tags.
+
+Background data output:
+- DynamoDB stores farmer, soil, crop plan, chat, scheme data.
+- S3 stores uploaded files and soil extraction JSON.
+- Qdrant stores/retrieves knowledge base chunks.
+- OpenAI generates advice, extraction, translation, memory, plans, and speech.
+
