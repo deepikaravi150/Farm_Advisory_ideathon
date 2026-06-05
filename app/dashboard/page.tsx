@@ -10,7 +10,6 @@ import TodayActionBanner from '@/components/dashboard/TodayActionBanner';
 import WeatherWidget from '@/components/dashboard/WeatherWidget';
 import CropPlanNextStepWidget, { type PlanItem } from '@/components/dashboard/CropPlanNextStepWidget';
 import SoilHealthWidget, { type SoilSummary } from '@/components/dashboard/SoilHealthWidget';
-import CropDoctorWidget from '@/components/dashboard/CropDoctorWidget';
 import MarketPricesWidget from '@/components/dashboard/MarketPricesWidget';
 import ChatSummaryWidget from '@/components/dashboard/ChatSummaryWidget';
 import ChatPanel from '@/components/chatbot/ChatPanel';
@@ -95,18 +94,15 @@ export default async function DashboardPage() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <CropDoctorWidget />
               <MarketPricesWidget defaultCommodity={marketDefault} />
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <LandMapWidget
                 coordinates={coords}
                 landArea={(profile?.land_area_acres as number) ?? 0}
                 s3ImageKey={profile?.land_picture_s3_key as string | undefined}
               />
-              <ChatSummaryWidget />
             </div>
+
+            <ChatSummaryWidget />
           </div>
 
           {/* Right column — chat */}

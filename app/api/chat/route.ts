@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { verifyToken } from '@/lib/auth';
-import { chatWithBedrock, summarizeText, extractFarmingContextTags, type Message } from '@/lib/ai/openai';
+import { chatWithBedrock, summarizeText, extractFarmingContextTags, extractFarmerFacts, extractTextFromDocument, type Message } from '@/lib/ai/openai';
 import { retrieveContext } from '@/lib/ai/rag';
-import { queryItems, putItem, getItem, Tables } from '@/lib/aws/dynamodb';
+import { queryItems, putItem, getItem, updateItem, Tables } from '@/lib/aws/dynamodb';
 import { generateId, extractCentroid } from '@/lib/utils';
 import { getCurrentWeather, get15DayForecast } from '@/lib/weather';
+import { buildS3Key, uploadToS3 } from '@/lib/aws/s3';
+import { formatMemoryForPrompt, type Fact } from '@/lib/memory';
+import { buildDiagnosisPrompt, parseDiagnosis, formatDiagnosisForPrompt, type Diagnosis } from '@/lib/crop-doctor';
 
 function getAuthFarmer(req: NextRequest) {
   const token = req.cookies.get('auth_token')?.value;
@@ -37,13 +40,15 @@ function formatSoilReportContext(soilData: Record<string, unknown> | undefined) 
   ].filter(Boolean).join('\n');
 }
 
+const HistorySchema = z.array(z.object({
+  role: z.enum(['user', 'assistant']),
+  content: z.string(),
+})).default([]);
+
 const ChatSchema = z.object({
   message: z.string().min(1),
   locale: z.enum(['en', 'hi', 'ta']).default('en'),
-  history: z.array(z.object({
-    role: z.enum(['user', 'assistant']),
-    content: z.string(),
-  })).default([]),
+  history: HistorySchema,
 });
 
 export async function POST(req: NextRequest) {
@@ -51,8 +56,63 @@ export async function POST(req: NextRequest) {
   if (!farmer) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   try {
-    const body = await req.json();
-    const { message, locale, history } = ChatSchema.parse(body);
+    // The chat accepts plain JSON (text/voice) or multipart/form-data when the
+    // farmer attaches a crop photo. Only switch to formData on multipart so the
+    // existing JSON callers are untouched.
+    const contentType = req.headers.get('content-type') ?? '';
+    const isMultipart = contentType.includes('multipart/form-data');
+
+    let message: string;
+    let locale: 'en' | 'hi' | 'ta';
+    let history: Message[];
+    let imageFile: File | null = null;
+
+    if (isMultipart) {
+      const form = await req.formData();
+      imageFile = (form.get('file') as File | null) ?? null;
+      const rawLocale = String(form.get('locale') ?? 'en');
+      locale = (['en', 'hi', 'ta'].includes(rawLocale) ? rawLocale : 'en') as 'en' | 'hi' | 'ta';
+      const caption = String(form.get('message') ?? '').trim();
+      message = caption || (locale === 'ta'
+        ? '[பயிர் புகைப்படம்] என் பயிரை பாருங்கள்.'
+        : locale === 'hi'
+          ? '[फसल फोटो] मेरी फसल देखिए।'
+          : '[crop photo] Please check my crop.');
+      let parsedHistory: unknown = [];
+      try { parsedHistory = JSON.parse(String(form.get('history') ?? '[]')); } catch { parsedHistory = []; }
+      history = HistorySchema.parse(Array.isArray(parsedHistory) ? parsedHistory : []);
+    } else {
+      const parsed = ChatSchema.parse(await req.json());
+      message = parsed.message;
+      locale = parsed.locale;
+      history = parsed.history;
+    }
+
+    // If a crop photo was attached, diagnose it via vision and fold the findings
+    // into the system prompt so the LLM can answer conversationally (not as JSON).
+    let diagnosis: Diagnosis | null = null;
+    let diagnosisContext = '';
+    let cropImageKey: string | undefined;
+    if (imageFile && imageFile.size > 0) {
+      const allowed = ['image/jpeg', 'image/png', 'image/webp'];
+      if (!allowed.includes(imageFile.type)) {
+        return NextResponse.json({ error: 'Please attach a JPEG, PNG, or WEBP photo.' }, { status: 400 });
+      }
+      if (imageFile.size > 10 * 1024 * 1024) {
+        return NextResponse.json({ error: 'Image too large. Please attach a photo under 10 MB.' }, { status: 400 });
+      }
+      try {
+        const buffer = Buffer.from(await imageFile.arrayBuffer());
+        cropImageKey = buildS3Key(farmer.farmerId, 'crop', imageFile.name || 'crop.jpg');
+        uploadToS3(cropImageKey, buffer, imageFile.type).catch((e) => console.error('Crop photo S3 upload failed:', e));
+        const raw = await extractTextFromDocument(buffer.toString('base64'), imageFile.type, buildDiagnosisPrompt(locale));
+        diagnosis = parseDiagnosis(raw);
+        diagnosisContext = formatDiagnosisForPrompt(diagnosis);
+      } catch (e) {
+        console.error('Crop photo diagnosis failed:', e);
+        diagnosisContext = 'A crop photo was shared but it could not be analysed clearly. Ask the farmer to resend a clear close-up of the affected leaves.';
+      }
+    }
 
     // Gather context (DynamoDB profile/history + RAG over the S3 knowledge base)
     const [profile, soilReports, cropPlans, recentChats, kbContext] = await Promise.all([
@@ -76,7 +136,9 @@ export async function POST(req: NextRequest) {
         KeyConditionExpression: 'farmer_id = :fid',
         ExpressionAttributeValues: { ':fid': farmer.farmerId },
         ScanIndexForward: false,
-        Limit: 5,
+        // Durable facts now live in persistent memory; keep only a small recency
+        // window of summaries for in-flight topic continuity.
+        Limit: 2,
       }),
       retrieveContext(message),
     ]);
@@ -89,6 +151,7 @@ export async function POST(req: NextRequest) {
     const soilData = soilReports[0];
     const cropPlan = cropPlans[0];
     const contextSummaries = recentChats.map((c) => c.summary).filter(Boolean).join('\n');
+    const memoryContext = formatMemoryForPrompt(profile?.memory as Fact[] | undefined);
 
     // Live weather for the farmer's land (centroid of land boundary, else Chennai).
     // Kept best-effort so chat still works if the weather API is unavailable.
@@ -126,11 +189,14 @@ Farmer Profile:
 - Land type: ${profile?.typography ?? 'unknown'}
 - Region: Tamil Nadu, India
 
+${memoryContext ? `${memoryContext}\n(Treat these as known facts about THIS farmer; use them and do not re-ask what is already known.)\n` : ''}
 ${formatSoilReportContext(soilData)}
 
 ${cropPlan ? `Current Crop Plan: ${cropPlan.crop_name}, Status: ${cropPlan.status}, Stage: ${cropPlan.current_stage ?? 'unknown'}` : 'No active crop plan.'}
 
 ${weatherContext ? `${weatherContext}\n(Use this live weather when giving advice on irrigation, spraying, sowing, harvesting or any weather-sensitive task. Reference specific days when relevant.)` : ''}
+
+${diagnosisContext ? `${diagnosisContext}\n(The farmer just shared a crop photo. Give a short, clear conversational diagnosis and the most important next steps. Do NOT output JSON. Weave in soil, weather, and the farmer's known facts where useful.)` : ''}
 
 ${contextSummaries ? `Recent conversation context:\n${contextSummaries}` : ''}
 
@@ -153,14 +219,17 @@ Response rules:
 
     const reply = await chatWithBedrock(messages, systemPrompt, { maxTokens: 1200 });
 
-    // Save chat to DynamoDB asynchronously
+    // Save chat to DynamoDB asynchronously. The stored user turn keeps a short
+    // text marker for image messages (no base64), so the item stays small.
     const fullConversation = [...messages, { role: 'assistant' as const, content: reply }];
     const conversationText = fullConversation.map(m => `${m.role}: ${m.content}`).join('\n');
+    const existingFacts = (profile?.memory as Fact[] | undefined) ?? [];
 
     Promise.all([
       summarizeText(conversationText),
       extractFarmingContextTags(conversationText),
-    ]).then(([summary, tags]) => {
+      extractFarmerFacts(conversationText, existingFacts),
+    ]).then(([summary, tags, mergedFacts]) => {
       putItem(Tables.CHAT_HISTORY, {
         farmer_id: farmer.farmerId,
         timestamp: new Date().toISOString(),
@@ -169,9 +238,19 @@ Response rules:
         summary,
         farming_context_tags: tags,
       }).catch(console.error);
+
+      // Persist the updated long-term farmer memory only when it changed.
+      if (JSON.stringify(mergedFacts) !== JSON.stringify(existingFacts)) {
+        updateItem({
+          TableName: Tables.FARMER_PROFILES,
+          Key: { farmer_id: farmer.farmerId },
+          UpdateExpression: 'SET memory = :m',
+          ExpressionAttributeValues: { ':m': mergedFacts },
+        }).catch(console.error);
+      }
     }).catch(console.error);
 
-    return NextResponse.json({ reply, locale });
+    return NextResponse.json({ reply, locale, diagnosis, s3Key: cropImageKey });
   } catch (err) {
     if (err instanceof z.ZodError) return NextResponse.json({ error: err.errors }, { status: 400 });
     console.error('Chat error:', err);

@@ -4,9 +4,11 @@ import { useTranslations } from 'next-intl';
 import Navbar from '@/components/layout/Navbar';
 import ProfileCard from '@/components/profile/ProfileCard';
 import SoilReportUpload from '@/components/profile/SoilReportUpload';
+import FarmerMemorySection from '@/components/profile/FarmerMemorySection';
 import { Loader2, FlaskConical } from 'lucide-react';
+import type { Fact } from '@/lib/memory';
 
-interface Profile { farmer_id: string; name: string; phone: string; address?: string; land_area_acres: number; typography: string; preferred_language: string; created_at: string; }
+interface Profile { farmer_id: string; name: string; phone: string; address?: string; land_area_acres: number; typography: string; preferred_language: string; created_at: string; memory?: Fact[]; }
 interface SoilData {
   ph: number;
   nitrogen: string;
@@ -58,6 +60,8 @@ export default function ProfilePage() {
           <p className="text-sm text-gray-500 mb-4">{t('soilReportSubtitle')}</p>
           <SoilReportUpload onUploadSuccess={setSoilData} />
         </div>
+
+        {profile && <FarmerMemorySection initialFacts={profile.memory ?? []} />}
       </div>
     </div>
   );

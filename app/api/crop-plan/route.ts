@@ -6,6 +6,7 @@ import { queryItems, putItem, getItem, updateItem, deleteItem, Tables } from '@/
 import { generateId, extractCentroid } from '@/lib/utils';
 import { get15DayForecast, type ForecastDay } from '@/lib/weather';
 import { annotateMilestonesWithWeather, forecastSummaryForPrompt } from '@/lib/crop-plan-weather';
+import { formatMemoryForPrompt, type Fact } from '@/lib/memory';
 import type { Milestone } from '@/lib/types/crop-plan';
 
 /** Best-effort 16-day forecast for the farmer's land (centroid, else Chennai). */
@@ -353,6 +354,7 @@ export async function POST(req: NextRequest) {
 
     const soilData = soilReports[0];
     const soilContext = formatSoilReportContext(soilData);
+    const memoryContext = formatMemoryForPrompt(profile?.memory as Fact[] | undefined);
     const today = new Date().toISOString().split('T')[0];
     const startDate = data.startDate || today;
     const forecast = await getFarmerForecast(profile);
@@ -454,7 +456,7 @@ Return one valid JSON object only.
 Use the farmer profile, soil data, assessment, and forecast exactly as provided.
 Write farmer-facing text in ${outputLanguage}.
 Do not invent unavailable soil values, land details, market prices, or weather data.
-Make the plan practical for a farmer to execute in the field.`,
+Make the plan practical for a farmer to execute in the field.${memoryContext ? `\n\n${memoryContext}\n(Use these known facts about the farmer to tailor crop choice, inputs, and schedule.)` : ''}`,
         // Detailed multi-stage plans are large; JSON mode + a high token cap keep
         // the response complete and parseable.
         { json: true, maxTokens: 7000 }

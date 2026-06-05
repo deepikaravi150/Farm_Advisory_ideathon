@@ -6,6 +6,7 @@ import { getItem, queryItems, Tables } from '@/lib/aws/dynamodb';
 import { extractCentroid } from '@/lib/utils';
 import { get15DayForecast, type ForecastDay } from '@/lib/weather';
 import { annotateMilestonesWithWeather, forecastSummaryForPrompt } from '@/lib/crop-plan-weather';
+import { formatMemoryForPrompt, type Fact } from '@/lib/memory';
 import type { CropPlan, Milestone } from '@/lib/types/crop-plan';
 
 function getAuthFarmer(req: NextRequest) {
@@ -74,6 +75,7 @@ export async function POST(req: NextRequest) {
       }),
     ]);
     const soilData = soilReports[0];
+    const memoryContext = formatMemoryForPrompt(profile?.memory as Fact[] | undefined);
     let forecast: ForecastDay[] = [];
     try {
       const coords = profile?.land_coordinates as Array<{ lat: number; lng: number }> | undefined;
@@ -100,6 +102,7 @@ ${JSON.stringify({ ...plan, milestones: plan.milestones }, null, 2)}
 
 ${formatSoilReportContext(soilData)}
 
+${memoryContext ? `${memoryContext}\n(Use these known facts about the farmer when answering or adjusting the plan.)\n` : ''}
 ${forecast.length ? `16-day weather forecast for the farmer's land:\n${forecastSummaryForPrompt(forecast)}\n` : ''}
 The farmer will ask questions or request changes (shift dates, add/remove/reorder stages, change crop, adjust costs or tasks, etc.).
 

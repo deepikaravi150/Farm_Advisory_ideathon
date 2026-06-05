@@ -1,4 +1,6 @@
 import OpenAI, { toFile } from 'openai';
+import { capFacts, isMemoryCategory, type Fact } from '@/lib/memory';
+import { generateId } from '@/lib/utils';
 
 const apiKey = process.env.OPENAI_API_KEY ?? '';
 const chatModel = process.env.OPENAI_CHAT_MODEL ?? 'gpt-5.2';
@@ -169,6 +171,72 @@ export async function extractFarmingContextTags(text: string): Promise<string[]>
     return Array.isArray(parsed.tags) ? parsed.tags : [];
   } catch {
     return [];
+  }
+}
+
+/**
+ * Maintain the farmer's long-term memory: merge durable facts from a conversation
+ * into the existing fact list (dedup, update contradictions, cap the size).
+ * Returns the FULL consolidated list. Never throws — on any failure it returns the
+ * existing facts unchanged, since it runs in a fire-and-forget background task.
+ */
+export async function extractFarmerFacts(
+  conversationText: string,
+  existingFacts: Fact[],
+): Promise<Fact[]> {
+  try {
+    const existingForPrompt = existingFacts.map((f) => ({ id: f.id, text: f.text, category: f.category }));
+    const res = await client.chat.completions.create({
+      model: chatModel,
+      max_completion_tokens: 1024,
+      response_format: { type: 'json_object' },
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You maintain a long-term memory of durable facts about a single farmer and their farm. Merge new information from the conversation into the existing fact list. Return ONLY valid JSON.',
+        },
+        {
+          role: 'user',
+          content: `Existing facts (JSON):
+${JSON.stringify(existingForPrompt)}
+
+New conversation:
+${conversationText}
+
+Rules:
+- Extract ONLY durable facts worth remembering long-term: crops/plots grown, land details, irrigation source/method, soil observations, pest/disease history, and lasting preferences (organic vs chemical, budget, selling habits, language).
+- IGNORE greetings, small talk, one-off weather, and anything already captured.
+- If new info updates or contradicts an existing fact, REPLACE that fact's text and REUSE its "id" (never duplicate).
+- Write each fact as one concise English sentence. Assign a "category" from: crop, land, irrigation, soil, pest, preference, other.
+- For genuinely new facts, set "id" to "NEW".
+- Keep at most 40 facts; drop the least useful if over.
+- Return JSON of the form {"facts":[{"id":"...","text":"...","category":"..."}]}.`,
+        },
+      ],
+    });
+    const parsed = JSON.parse(res.choices[0]?.message?.content ?? '{}');
+    const raw = Array.isArray(parsed.facts) ? parsed.facts : null;
+    if (!raw) return existingFacts;
+
+    const now = new Date().toISOString();
+    const merged: Fact[] = raw
+      .filter((f: unknown): f is { id?: unknown; text?: unknown; category?: unknown } => !!f && typeof f === 'object')
+      .map((f: { id?: unknown; text?: unknown; category?: unknown }) => {
+        const text = typeof f.text === 'string' ? f.text.trim() : '';
+        const id = typeof f.id === 'string' && f.id && f.id !== 'NEW' ? f.id : generateId();
+        const category = isMemoryCategory(f.category) ? f.category : 'other';
+        const prior = existingFacts.find((e) => e.id === id);
+        // Keep the original timestamp when the fact text is unchanged.
+        const updatedAt = prior && prior.text === text ? prior.updatedAt : now;
+        return { id, text, category, updatedAt };
+      })
+      .filter((f: Fact) => f.text);
+
+    return capFacts(merged);
+  } catch (err) {
+    console.error('extractFarmerFacts failed:', err);
+    return existingFacts;
   }
 }
 
