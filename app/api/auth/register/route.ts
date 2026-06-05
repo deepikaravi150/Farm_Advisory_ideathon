@@ -4,6 +4,7 @@ import { putItem, getItem, Tables } from '@/lib/aws/dynamodb';
 import { hashPassword } from '@/lib/auth';
 import { generateId } from '@/lib/utils';
 import { findFarmersByPhone } from '@/app/api/auth/farmers';
+import { verifyPhoneVerificationOtp } from '@/lib/aws/sns';
 
 function requireAwsEnv() {
   const missing = ['AWS_REGION', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY'].filter(key => !process.env[key]);
@@ -11,6 +12,13 @@ function requireAwsEnv() {
     throw new Error(`Missing environment variables: ${missing.join(', ')}. Create .env.local with the required AWS credentials.`);
   }
 }
+
+const PasswordSchema = z.string()
+  .min(8, 'Password must be at least 8 characters')
+  .regex(/[A-Z]/, 'Password must include an uppercase letter')
+  .regex(/[a-z]/, 'Password must include a lowercase letter')
+  .regex(/\d/, 'Password must include a number')
+  .regex(/[^A-Za-z0-9]/, 'Password must include a special character');
 
 const RegisterSchema = z.object({
   farmerId: z.string().min(1, 'Farmer ID is required'),
@@ -21,7 +29,8 @@ const RegisterSchema = z.object({
   typography: z.string().optional(),
   landAreaAcres: z.number().positive(),
   landPictureS3Key: z.string().optional(),
-  password: z.string().min(8, 'Password must be at least 8 characters'),
+  password: PasswordSchema,
+  otp: z.string().regex(/^\d{6}$/, 'Enter the 6-digit OTP sent to the phone number'),
 });
 
 export async function POST(req: NextRequest) {
@@ -41,6 +50,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Phone number already registered' }, { status: 409 });
     }
 
+    await verifyPhoneVerificationOtp(data.phone, data.otp);
+
     const passwordHash = await hashPassword(data.password);
     const uniqueId = generateId();
 
@@ -54,6 +65,8 @@ export async function POST(req: NextRequest) {
       typography: data.typography ?? '',
       land_area_acres: data.landAreaAcres,
       land_picture_s3_key: data.landPictureS3Key ?? '',
+      phone_verified: true,
+      phone_verified_at: new Date().toISOString(),
       password_hash: passwordHash,
       preferred_language: 'en',
       created_at: new Date().toISOString(),

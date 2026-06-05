@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { useTranslations } from 'next-intl';
-import { Eye, EyeOff, Sprout } from 'lucide-react';
+import { CheckCircle2, Eye, EyeOff, Sprout } from 'lucide-react';
 import FarmerDetailsForm, { type FarmerFormData } from '@/components/register/FarmerDetailsForm';
 
 const LandMapSelector = dynamic(() => import('@/components/register/LandMapSelector'), {
@@ -29,14 +29,24 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  const passwordRules = [
+    { label: 'At least 8 characters', valid: password.length >= 8 },
+    { label: 'One uppercase letter', valid: /[A-Z]/.test(password) },
+    { label: 'One lowercase letter', valid: /[a-z]/.test(password) },
+    { label: 'One number', valid: /\d/.test(password) },
+    { label: 'One special character', valid: /[^A-Za-z0-9]/.test(password) },
+  ];
+  const isPasswordStrong = passwordRules.every((rule) => rule.valid);
+
   function onDetailsNext(data: FarmerFormData) {
+    setError('');
     setFormData(data);
     setStep('map');
   }
 
   async function register() {
     if (password !== confirmPassword) { setError(t('errPasswordsNoMatch')); return; }
-    if (password.length < 8) { setError(t('errPasswordShort')); return; }
+    if (!isPasswordStrong) { setError('Password must meet all security requirements'); return; }
     setLoading(true);
     setError('');
     try {
@@ -101,6 +111,14 @@ export default function RegisterPage() {
                   aria-label={showPassword ? 'Hide password' : 'Show password'}>
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
+              </div>
+              <div className="mt-2 grid grid-cols-1 gap-1">
+                {passwordRules.map((rule) => (
+                  <p key={rule.label} className={`flex items-center gap-1.5 text-xs ${rule.valid ? 'text-brand-600' : 'text-gray-400'}`}>
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    {rule.label}
+                  </p>
+                ))}
               </div>
             </div>
             <div>

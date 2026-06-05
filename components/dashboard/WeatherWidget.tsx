@@ -12,11 +12,11 @@ interface Props {
 
 // Tone → background/border styling for the verdict hero and chips.
 const TONE_STYLES: Record<string, { gradient: string; chip: string }> = {
-  storm: { gradient: 'from-slate-700 to-slate-900', chip: 'bg-amber-400/25 border-amber-200' },
-  rain:  { gradient: 'from-sky-600 to-indigo-700',  chip: 'bg-sky-300/25 border-sky-200' },
-  hot:   { gradient: 'from-orange-500 to-amber-600', chip: 'bg-orange-300/25 border-orange-200' },
-  wet:   { gradient: 'from-sky-500 to-blue-600',     chip: 'bg-sky-300/25 border-sky-200' },
-  good:  { gradient: 'from-sky-500 to-blue-600',     chip: 'bg-emerald-300/25 border-emerald-200' },
+  storm: { gradient: 'from-sky-500 to-blue-600', chip: 'bg-sky-300/25 border-sky-200' },
+  rain:  { gradient: 'from-sky-500 to-blue-600', chip: 'bg-sky-300/25 border-sky-200' },
+  hot:   { gradient: 'from-sky-500 to-blue-600', chip: 'bg-sky-300/25 border-sky-200' },
+  wet:   { gradient: 'from-sky-500 to-blue-600', chip: 'bg-sky-300/25 border-sky-200' },
+  good:  { gradient: 'from-sky-500 to-blue-600', chip: 'bg-sky-300/25 border-sky-200' },
 };
 
 export default function WeatherWidget({ current, forecast }: Props) {
