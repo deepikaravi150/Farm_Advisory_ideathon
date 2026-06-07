@@ -1,19 +1,25 @@
 'use client';
 import { useState, useRef, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { Send, Bot, User, Loader2, Plus, Camera, X } from 'lucide-react';
 import VoiceInput from './VoiceInput';
 import VoiceOutput from './VoiceOutput';
-import Cookies from 'js-cookie';
+import FormattedMessage from './FormattedMessage';
 
 interface Message { role: 'user' | 'assistant'; content: string; imageUrl?: string; }
 
-export default function ChatPanel() {
-  const router = useRouter();
+interface Props {
+  initialMessages?: Message[];
+  chatId?: string;
+  chatTimestamp?: string;
+}
+
+export default function ChatPanel({ initialMessages = [], chatId, chatTimestamp }: Props) {
   const t = useTranslations('chat');
   const appLocale = useLocale() as 'en' | 'hi' | 'ta';
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>(initialMessages);
+  const [activeChatId, setActiveChatId] = useState<string | undefined>(chatId);
+  const [activeChatTimestamp, setActiveChatTimestamp] = useState<string | undefined>(chatTimestamp);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [locale, setLocale] = useState<'en' | 'hi' | 'ta'>(appLocale);
@@ -21,11 +27,21 @@ export default function ChatPanel() {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+  useEffect(() => {
+    if (scrollAreaRef.current) {
+      scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight;
+    }
+  }, [messages, loading]);
   useEffect(() => { setLocale(appLocale); }, [appLocale]);
+  useEffect(() => {
+    setMessages(initialMessages);
+    setActiveChatId(chatId);
+    setActiveChatTimestamp(chatTimestamp);
+  }, [initialMessages, chatId, chatTimestamp]);
 
   function onPickImage(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -44,7 +60,7 @@ export default function ChatPanel() {
 
   // Plain {role,content} history for the API (drop local-only fields like imageUrl).
   function historyForApi() {
-    return messages.slice(-6).map(m => ({ role: m.role, content: m.content }));
+    return messages.map(m => ({ role: m.role, content: m.content }));
   }
 
   async function sendMessage(text?: string) {
@@ -71,18 +87,22 @@ export default function ChatPanel() {
         form.append('message', msg);
         form.append('locale', locale);
         form.append('history', JSON.stringify(historyForApi()));
+        if (activeChatId) form.append('chatId', activeChatId);
+        if (activeChatTimestamp) form.append('chatTimestamp', activeChatTimestamp);
         // No Content-Type header — the browser sets the multipart boundary.
         res = await fetch('/api/chat', { method: 'POST', body: form });
       } else {
         res = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: msg, locale, history: historyForApi() }),
+          body: JSON.stringify({ message: msg, locale, history: historyForApi(), chatId: activeChatId, chatTimestamp: activeChatTimestamp }),
         });
       }
       const data = await res.json();
       if (data.reply) {
         setMessages([...newMessages, { role: 'assistant', content: data.reply }]);
+        if (data.chatId) setActiveChatId(data.chatId);
+        if (data.timestamp) setActiveChatTimestamp(data.timestamp);
         setLastReply(data.reply);
       } else {
         setMessages([...newMessages, { role: 'assistant', content: typeof data.error === 'string' ? data.error : t('error') }]);
@@ -94,15 +114,10 @@ export default function ChatPanel() {
     }
   }
 
-  function changeLocale(next: 'en' | 'hi' | 'ta') {
-    setLocale(next);
-    Cookies.set('locale', next, { expires: 365 });
-    // Re-render server components so the whole app switches language too.
-    router.refresh();
-  }
-
   function startNewChat() {
     setMessages([]);
+    setActiveChatId(undefined);
+    setActiveChatTimestamp(undefined);
     setInput('');
     setLastReply('');
     clearImage();
@@ -115,15 +130,9 @@ export default function ChatPanel() {
           <Bot className="w-5 h-5" />
           <span className="font-semibold">{t('title')}</span>
         </div>
-        <select value={locale} onChange={e => changeLocale(e.target.value as typeof locale)}
-          className="bg-brand-600 text-white text-sm rounded px-2 py-1 border border-brand-500">
-          <option value="en">English</option>
-          <option value="hi">हिन्दी</option>
-          <option value="ta">தமிழ்</option>
-        </select>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+      <div ref={scrollAreaRef} className="flex-1 overflow-y-auto p-4 space-y-3">
         {!messages.length && (
           <div className="text-center text-gray-400 py-12">
             <Bot className="w-12 h-12 mx-auto mb-3 text-brand-300" />
@@ -138,7 +147,7 @@ export default function ChatPanel() {
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={m.imageUrl} alt="crop" className="mb-1.5 max-h-48 w-full rounded-lg object-cover" />
               )}
-              {m.content && <p className="whitespace-pre-wrap">{m.content}</p>}
+              {m.content && (m.role === 'assistant' ? <FormattedMessage text={m.content} /> : <p className="whitespace-pre-wrap">{m.content}</p>)}
               {m.role === 'assistant' && <VoiceOutput text={m.content} locale={locale} />}
             </div>
             {m.role === 'user' && <div className="w-7 h-7 rounded-full bg-brand-600 flex items-center justify-center flex-shrink-0 mt-1"><User className="w-4 h-4 text-white" /></div>}

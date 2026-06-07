@@ -18,11 +18,15 @@ interface SoilData {
   recommendations: string;
   labName: string;
   reportDate: string;
+  locale?: string | null;
 }
 
-interface Props { onUploadSuccess: (data: SoilData) => void; }
+interface Props {
+  initialSoil?: SoilData | null;
+  onUploadSuccess: (data: SoilData) => void;
+}
 
-export default function SoilReportUpload({ onUploadSuccess }: Props) {
+export default function SoilReportUpload({ initialSoil, onUploadSuccess }: Props) {
   const t = useTranslations('soil');
   const locale = useLocale();
   const [uploading, setUploading] = useState(false);
@@ -30,7 +34,13 @@ export default function SoilReportUpload({ onUploadSuccess }: Props) {
   const [displayResult, setDisplayResult] = useState<SoilData | null>(null);
   const [error, setError] = useState('');
   const [errorDetail, setErrorDetail] = useState('');
+  const [notice, setNotice] = useState('');
   const [translating, setTranslating] = useState(false);
+
+  useEffect(() => {
+    setResult(initialSoil ?? null);
+    setDisplayResult(initialSoil ?? null);
+  }, [initialSoil]);
 
   const onDrop = useCallback(async (files: File[]) => {
     const file = files[0];
@@ -38,6 +48,7 @@ export default function SoilReportUpload({ onUploadSuccess }: Props) {
     setUploading(true);
     setError('');
     setErrorDetail('');
+    setNotice('');
     try {
       const form = new FormData();
       form.append('file', file);
@@ -51,6 +62,13 @@ export default function SoilReportUpload({ onUploadSuccess }: Props) {
       }
       setResult(data.soilData);
       setDisplayResult(data.soilData);
+      if (data.duplicate) {
+        setNotice(locale === 'ta'
+          ? 'இந்த மண் அறிக்கை விவரங்கள் ஏற்கனவே உள்ளன. கீழே உள்ள தற்போதைய விவரங்கள் பயன்படுத்தப்படுகின்றன.'
+          : locale === 'hi'
+            ? 'इस मिट्टी रिपोर्ट का विवरण पहले से मौजूद है। नीचे मौजूदा विवरण दिखाया गया है।'
+            : 'These soil report details are already present. The current details are shown below.');
+      }
       onUploadSuccess(data.soilData);
     } catch (err) {
       setError(t('uploadFailed'));
@@ -130,6 +148,25 @@ export default function SoilReportUpload({ onUploadSuccess }: Props) {
 
   return (
     <div className="space-y-4">
+      {displayResult && (
+        <div className="rounded-2xl border border-green-200 bg-green-50 p-4">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="h-5 w-5 text-green-600" />
+            <div>
+              <p className="font-semibold text-green-800">{labels.extracted}</p>
+              <p className="text-xs text-green-700">
+                {locale === 'ta'
+                  ? 'இந்த மண் அறிக்கை விவரங்கள் உங்கள் சுயவிவரத்தில் ஏற்கனவே சேமிக்கப்பட்டுள்ளன.'
+                  : locale === 'hi'
+                    ? 'यह मिट्टी रिपोर्ट विवरण आपकी प्रोफाइल में पहले से सेव है।'
+                    : 'These soil report details are already saved in your profile.'}
+              </p>
+            </div>
+            {translating && <Loader2 className="ml-auto h-4 w-4 animate-spin text-green-600" />}
+          </div>
+        </div>
+      )}
+
       <div {...getRootProps()} className={`border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition-colors ${isDragActive ? 'border-brand-400 bg-brand-50' : 'border-gray-300 hover:border-brand-400 hover:bg-gray-50'}`}>
         <input {...getInputProps()} />
         {uploading ? (
@@ -153,6 +190,13 @@ export default function SoilReportUpload({ onUploadSuccess }: Props) {
             <p>{error}</p>
             {errorDetail && <p className="mt-1 text-xs text-red-500">{errorDetail}</p>}
           </div>
+        </div>
+      )}
+
+      {notice && (
+        <div className="flex gap-2 text-amber-700 bg-amber-50 rounded-xl p-3">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          <p>{notice}</p>
         </div>
       )}
 

@@ -24,8 +24,13 @@ export default function PlanChatPanel({ plan, onApply }: Props) {
   const [loading, setLoading] = useState(false);
   const locale = useLocale() as 'en' | 'hi' | 'ta';
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, loading]);
+  useEffect(() => {
+    if (scrollAreaRef.current) {
+      scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight;
+    }
+  }, [messages, loading]);
 
   async function send(text?: string) {
     const msg = (text ?? input).trim();
@@ -69,7 +74,7 @@ export default function PlanChatPanel({ plan, onApply }: Props) {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+      <div ref={scrollAreaRef} className="flex-1 overflow-y-auto p-4 space-y-3">
         {!messages.length && (
           <div className="text-center text-gray-400 py-10">
             <Bot className="w-10 h-10 mx-auto mb-3 text-brand-300" />

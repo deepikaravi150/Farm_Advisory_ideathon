@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getPhoneVerificationStatus, normalizePhoneNumber } from '@/lib/aws/sns';
+import { toTenDigitPhone } from '@/lib/phone';
 
 const StatusSchema = z.object({
-  phone: z.string().regex(/^\d{10}$/, 'Enter a valid 10-digit phone number'),
+  phone: z.preprocess((value) => toTenDigitPhone(String(value ?? '')), z.string().regex(/^\d{10}$/, 'Enter a valid 10-digit phone number')),
 });
 
 export async function POST(req: NextRequest) {

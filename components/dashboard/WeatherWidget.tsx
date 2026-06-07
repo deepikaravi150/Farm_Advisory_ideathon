@@ -34,6 +34,40 @@ export default function WeatherWidget({ current, forecast }: Props) {
     });
   }
 
+  function localizePlaceName(value: string) {
+    const names: Record<string, { hi: string; ta: string }> = {
+      Kalasapakkam: { hi: 'कलासपक्कम', ta: 'கலசப்பாக்கம்' },
+    };
+    if (appLocale === 'en') return value;
+    let text = value
+      .replace(/^Farm near\s+/i, appLocale === 'ta' ? 'பண்ணைக்கு அருகில் ' : 'खेत के पास ')
+      .replace(/^Your Farm$/i, appLocale === 'ta' ? 'உங்கள் பண்ணை' : 'आपका खेत');
+    for (const [name, labels] of Object.entries(names)) {
+      text = text.replace(new RegExp(name, 'gi'), labels[appLocale]);
+    }
+    return text;
+  }
+
+  function localizeWeatherDescription(value: string) {
+    const descriptions: Record<string, { hi: string; ta: string }> = {
+      'Clear sky': { hi: 'साफ आसमान', ta: 'தெளிந்த வானம்' },
+      'Mainly clear': { hi: 'अधिकतर साफ', ta: 'பெரும்பாலும் தெளிவு' },
+      'Partly cloudy': { hi: 'आंशिक बादल', ta: 'பகுதி மேகமூட்டம்' },
+      Overcast: { hi: 'घने बादल', ta: 'மேகமூட்டம்' },
+      Foggy: { hi: 'कोहरा', ta: 'மூடுபனி' },
+      'Light drizzle': { hi: 'हल्की फुहार', ta: 'லேசான தூறல்' },
+      Drizzle: { hi: 'फुहार', ta: 'தூறல்' },
+      'Heavy drizzle': { hi: 'तेज फुहार', ta: 'கனமான தூறல்' },
+      'Slight rain': { hi: 'हल्की बारिश', ta: 'லேசான மழை' },
+      Rain: { hi: 'बारिश', ta: 'மழை' },
+      'Heavy rain': { hi: 'भारी बारिश', ta: 'கனமழை' },
+      'Rain showers': { hi: 'बारिश की बौछार', ta: 'மழை சாரல்' },
+      Thunderstorm: { hi: 'आंधी-तूफान', ta: 'இடி மின்னல் மழை' },
+    };
+    if (appLocale === 'en') return value;
+    return descriptions[value]?.[appLocale] ?? value;
+  }
+
   function fieldRisk(day: ForecastDay) {
     const condition = day.description.toLowerCase();
     if (condition.includes('thunder') || day.rain_mm >= 20 || day.temp_max >= 38) {
@@ -59,7 +93,7 @@ export default function WeatherWidget({ current, forecast }: Props) {
 
   if (!current) {
     return (
-      <div className="bg-white rounded-2xl p-5 shadow border border-red-100 flex items-center gap-2 text-red-500">
+      <div className="flex items-center gap-2 rounded-xl border border-red-100 bg-white p-4 text-red-500 shadow sm:p-5">
         <AlertTriangle className="w-5 h-5" /> {t('unavailable')}
       </div>
     );
@@ -71,7 +105,7 @@ export default function WeatherWidget({ current, forecast }: Props) {
   const tone = TONE_STYLES[verdict.tone] ?? TONE_STYLES.good;
 
   return (
-    <div className={`bg-gradient-to-br ${tone.gradient} text-white rounded-2xl p-5 shadow-lg`}>
+    <div className={`rounded-xl bg-gradient-to-br ${tone.gradient} p-4 text-white shadow-lg sm:p-5`}>
       {/* Verdict hero — the one-glance conclusion leads. */}
       <div className="flex items-start gap-4">
         <span className="text-5xl leading-none">{verdict.emoji}</span>
@@ -81,7 +115,7 @@ export default function WeatherWidget({ current, forecast }: Props) {
         </div>
         <div className="text-right">
           <p className="text-3xl font-bold leading-none">{current.temp}&deg;</p>
-          <p className="text-[11px] text-white/70 mt-1">{current.city}</p>
+          <p className="text-[11px] text-white/70 mt-1">{localizePlaceName(current.city)}</p>
         </div>
       </div>
 
@@ -90,7 +124,7 @@ export default function WeatherWidget({ current, forecast }: Props) {
         <span className="flex items-center gap-1"><ThermometerSun className="w-3.5 h-3.5" />{t('feels', { temp: current.feels_like })}</span>
         <span className="flex items-center gap-1"><Droplets className="w-3.5 h-3.5" />{current.humidity}%</span>
         <span className="flex items-center gap-1"><Wind className="w-3.5 h-3.5" />{current.wind_speed} km/h</span>
-        <span className="capitalize text-white/70">{current.description}</span>
+        <span className="capitalize text-white/70">{localizeWeatherDescription(current.description)}</span>
       </div>
 
       {/* The single most important action. */}

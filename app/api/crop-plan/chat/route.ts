@@ -79,8 +79,10 @@ export async function POST(req: NextRequest) {
     let forecast: ForecastDay[] = [];
     try {
       const coords = profile?.land_coordinates as Array<{ lat: number; lng: number }> | undefined;
-      const { lat, lng } = coords?.length ? extractCentroid(coords) : { lat: 13.0827, lng: 80.2707 };
-      forecast = await get15DayForecast(lat, lng);
+      if (coords?.length) {
+        const { lat, lng } = extractCentroid(coords);
+        forecast = await get15DayForecast(lat, lng);
+      }
     } catch (e) {
       console.error('Plan-chat forecast fetch failed:', e);
     }

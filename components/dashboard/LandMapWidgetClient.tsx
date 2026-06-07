@@ -8,7 +8,7 @@ import dynamic from 'next/dynamic';
  */
 const LandMapWidget = dynamic(() => import('./LandMapWidget'), {
   ssr: false,
-  loading: () => <div className="bg-white rounded-2xl h-48 animate-pulse shadow border border-gray-100" />,
+  loading: () => <div className="h-48 animate-pulse rounded-xl border border-gray-100 bg-white shadow" />,
 });
 
 export default LandMapWidget;

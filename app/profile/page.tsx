@@ -22,6 +22,7 @@ interface SoilData {
   recommendations: string;
   labName: string;
   reportDate: string;
+  locale?: string | null;
 }
 
 export default function ProfilePage() {
@@ -31,7 +32,13 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/farmer/profile').then(r => r.json()).then(p => setProfile(p)).finally(() => setLoading(false));
+    Promise.all([
+      fetch('/api/farmer/profile').then(r => r.json()),
+      fetch('/api/soil', { cache: 'no-store' }).then(r => r.json()).catch(() => ({ soil: null })),
+    ]).then(([p, soilResponse]) => {
+      setProfile(p);
+      setSoilData(soilResponse.soil ?? null);
+    }).finally(() => setLoading(false));
   }, []);
 
   async function saveProfile(data: Partial<Profile>) {
@@ -58,7 +65,7 @@ export default function ProfilePage() {
             <FlaskConical className="w-5 h-5 text-brand-600" /> {t('soilReportTitle')}
           </h2>
           <p className="text-sm text-gray-500 mb-4">{t('soilReportSubtitle')}</p>
-          <SoilReportUpload onUploadSuccess={setSoilData} />
+          <SoilReportUpload initialSoil={soilData} onUploadSuccess={setSoilData} />
         </div>
 
         {profile && <FarmerMemorySection initialFacts={profile.memory ?? []} />}

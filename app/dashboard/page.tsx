@@ -11,11 +11,45 @@ import WeatherWidget from '@/components/dashboard/WeatherWidget';
 import CropPlanNextStepWidget, { type PlanItem } from '@/components/dashboard/CropPlanNextStepWidget';
 import SoilHealthWidget, { type SoilSummary } from '@/components/dashboard/SoilHealthWidget';
 import MarketPricesWidget from '@/components/dashboard/MarketPricesWidget';
+import SuitableCropsWidget from '@/components/dashboard/SuitableCropsWidget';
 import ChatSummaryWidget from '@/components/dashboard/ChatSummaryWidget';
+import DailySmsWidget from '@/components/dashboard/DailySmsWidget';
 import ChatPanel from '@/components/chatbot/ChatPanel';
 import LandMapWidget from '@/components/dashboard/LandMapWidgetClient';
 
-export default async function DashboardPage() {
+type DashboardPlan = PlanItem & {
+  start_date?: string;
+  active_from?: string;
+};
+
+function addDays(date: string, days: number) {
+  const next = new Date(`${date}T00:00:00`);
+  next.setDate(next.getDate() + days);
+  return next.toISOString().split('T')[0];
+}
+
+function dayDiff(from: string, to: string) {
+  return Math.round((new Date(`${to}T00:00:00`).getTime() - new Date(`${from}T00:00:00`).getTime()) / 86_400_000);
+}
+
+function normalizeActivePlanDates(plan: DashboardPlan | null): DashboardPlan | null {
+  if (!plan?.active_from || !plan.start_date || !Array.isArray(plan.milestones)) return plan;
+  const offset = dayDiff(plan.start_date, plan.active_from);
+  if (offset === 0) return plan;
+
+  return {
+    ...plan,
+    milestones: plan.milestones.map((milestone) => ({
+      ...milestone,
+      date: milestone.date ? addDays(milestone.date, offset) : milestone.date,
+      endDate: milestone.endDate ? addDays(milestone.endDate, offset) : milestone.endDate,
+    })),
+  };
+}
+
+export default async function DashboardPage(props: any) {
+  const searchParams = props.searchParams ? await props.searchParams : {};
+  const selectedChatId = typeof searchParams.chat === 'string' ? searchParams.chat : null;
   const cookieStore = await cookies();
   const token = cookieStore.get('auth_token')?.value;
   const farmer = token ? verifyToken(token) : null;
@@ -26,14 +60,15 @@ export default async function DashboardPage() {
   // Fetch weather, soil report, and crop plans server-side so the dashboard renders
   // instantly and several widgets can share the same data without re-fetching.
   const coords = (profile?.land_coordinates as Array<{ lat: number; lng: number }>) ?? [];
-  const { lat, lng } = coords.length ? extractCentroid(coords) : { lat: 13.0827, lng: 80.2707 };
+  const landCenter = coords.length ? extractCentroid(coords) : null;
 
-  const [weatherData, soilReports, cropPlans] = await Promise.all([
+  const [weatherData, soilReports, cropPlans, selectedChatMatches] = await Promise.all([
     (async (): Promise<{ current: CurrentWeather | null; forecast: ForecastDay[] }> => {
       try {
+        if (!landCenter) return { current: null, forecast: [] };
         const [current, forecast] = await Promise.all([
-          getCurrentWeather(lat, lng),
-          get15DayForecast(lat, lng),
+          getCurrentWeather(landCenter.lat, landCenter.lng),
+          get15DayForecast(landCenter.lat, landCenter.lng),
         ]);
         return { current, forecast };
       } catch (e) {
@@ -55,11 +90,35 @@ export default async function DashboardPage() {
       ScanIndexForward: false,
       Limit: 10,
     }).catch(() => []),
+    selectedChatId
+      ? queryItems({
+          TableName: Tables.CHAT_HISTORY,
+          KeyConditionExpression: 'farmer_id = :fid',
+          ExpressionAttributeValues: { ':fid': farmer.farmerId },
+          ScanIndexForward: false,
+          Limit: 25,
+        }).catch(() => [])
+      : Promise.resolve([]),
   ]);
 
-  const soil = (soilReports[0] as unknown as SoilSummary | undefined) ?? null;
-  // Prefer an active plan, otherwise the most recently created one.
-  const plan = ((cropPlans.find((p) => p.status === 'active') ?? cropPlans[0]) ?? null) as unknown as PlanItem | null;
+  const rawSoil = (soilReports[0] as Record<string, unknown> | undefined) ?? null;
+  const soil = rawSoil ? {
+    ph: (rawSoil.ph as number | null | undefined) ?? null,
+    nitrogen: (rawSoil.nitrogen as string | null | undefined) ?? null,
+    phosphorus: (rawSoil.phosphorus as string | null | undefined) ?? null,
+    potassium: (rawSoil.potassium as string | null | undefined) ?? null,
+    plain_language_summary: (rawSoil.plain_language_summary as string | null | undefined) ?? null,
+    key_findings: (rawSoil.key_findings as string[] | null | undefined) ?? null,
+    recommendations: (rawSoil.recommendations as string[] | string | null | undefined) ?? null,
+    locale: (rawSoil.locale as string | null | undefined) ?? null,
+  } satisfies SoilSummary : null;
+  // Dashboard must show every active crop plan. If a plan is made inactive
+  // or deleted, dashboard crop-plan-dependent widgets should remove it.
+  const activePlans = cropPlans
+    .filter((p) => p.status === 'active')
+    .map((p) => normalizeActivePlanDates(p as unknown as DashboardPlan))
+    .filter((p): p is DashboardPlan => Boolean(p));
+  const plan = activePlans[0] ?? null;
 
   // Only seed the market widget with the crop name when it is plain English
   // (the data.gov.in commodity filter does not understand Tamil/Hindi names).
@@ -69,31 +128,41 @@ export default async function DashboardPage() {
   const t = await getTranslations('dashboard');
   const locale = await getLocale();
   const dateLocale = ({ en: 'en-IN', hi: 'hi-IN', ta: 'ta-IN' } as Record<string, string>)[locale] ?? 'en-IN';
+  const selectedChat = selectedChatId
+    ? selectedChatMatches.find((entry) => entry.chat_id === selectedChatId)
+    : null;
+  const selectedMessages = Array.isArray(selectedChat?.messages)
+    ? selectedChat.messages as Array<{ role: 'user' | 'assistant'; content: string }>
+    : [];
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-slate-50">
       <Navbar farmerName={farmer.name} />
-      <div className="max-w-7xl mx-auto px-4 py-6">
-        <h1 className="text-2xl font-bold text-gray-800 mb-1">{t('greeting', { name: farmer.name })}</h1>
-        <p className="text-sm text-gray-500 mb-6">{new Date().toLocaleDateString(dateLocale, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+      <main className="mx-auto max-w-[1440px] px-3 py-4 sm:px-5 sm:py-6 lg:px-8">
+        <div className="mb-5 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">{t('greeting', { name: farmer.name })}</h1>
+            <p className="mt-1 text-sm text-gray-500">{new Date().toLocaleDateString(dateLocale, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+          </div>
+        </div>
 
         <TodayActionBanner
           current={weatherData.current}
           forecast={weatherData.forecast}
-          plan={plan}
+          plans={activePlans}
         />
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_390px] xl:items-start">
           {/* Left column — widgets */}
-          <div className="lg:col-span-2 space-y-6">
+          <div className="space-y-5">
             <WeatherWidget current={weatherData.current} forecast={weatherData.forecast} />
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <CropPlanNextStepWidget plan={plan} />
+            <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+              <CropPlanNextStepWidget plans={activePlans} />
               <SoilHealthWidget soil={soil} />
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 lg:items-start">
               <MarketPricesWidget defaultCommodity={marketDefault} />
               <LandMapWidget
                 coordinates={coords}
@@ -102,15 +171,23 @@ export default async function DashboardPage() {
               />
             </div>
 
-            <ChatSummaryWidget />
+            <SuitableCropsWidget />
+            <DailySmsWidget />
           </div>
 
           {/* Right column — chat */}
-          <div className="lg:col-span-1 h-[600px]">
-            <ChatPanel />
+          <div className="space-y-5 xl:sticky xl:top-24">
+            <div className="h-[520px] sm:h-[600px] xl:h-[560px]">
+              <ChatPanel
+                initialMessages={selectedMessages}
+                chatId={selectedChat?.chat_id as string | undefined}
+                chatTimestamp={selectedChat?.timestamp as string | undefined}
+              />
+            </div>
+            <ChatSummaryWidget />
           </div>
         </div>
-      </div>
+      </main>
     </div>
   );
 }

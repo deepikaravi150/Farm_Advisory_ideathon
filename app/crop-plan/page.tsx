@@ -377,10 +377,18 @@ export default function CropPlanPage() {
   const [translatingPlan, setTranslatingPlan] = useState(false);
   const [translationError, setTranslationError] = useState('');
   const [soil, setSoil] = useState<SoilData | null>(null);
+  const [farmerName, setFarmerName] = useState('');
 
   useEffect(() => {
     refreshPlans().catch(() => setShowModal(true))
       .finally(() => setInitialLoading(false));
+  }, []);
+
+  useEffect(() => {
+    fetch('/api/farmer/profile', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((profile) => setFarmerName(typeof profile?.name === 'string' ? profile.name : ''))
+      .catch(() => setFarmerName(''));
   }, []);
 
   // Latest soil report, used by the "current state of land" section.
@@ -735,7 +743,7 @@ export default function CropPlanPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Navbar />
+      <Navbar farmerName={farmerName} />
       <div className="max-w-7xl mx-auto px-4 py-6">
         <div className="flex items-center justify-between mb-6">
           <div>
@@ -789,7 +797,7 @@ export default function CropPlanPage() {
                     }`}
                   >
                     <button type="button" onClick={() => setActivePlan(plan)} className="w-full text-left pr-7">
-                      <p className="text-sm font-semibold text-gray-800 truncate">
+                      <p className="text-sm font-semibold text-gray-800">
                         {selected && displayPlan ? localizedDisplayCropName : localizeCropName(plan.cropName, locale)}
                       </p>
                       <p className="text-xs text-gray-500 mt-0.5">{plan.startDate ?? labels.noStartDate}</p>

@@ -60,7 +60,8 @@ async function reverseGeocode(lat: number, lon: number): Promise<string> {
     if (!res.ok) return 'Your Farm';
     const data = await res.json();
     const a = data.address ?? {};
-    return a.village ?? a.town ?? a.city ?? a.county ?? a.state ?? 'Your Farm';
+    const place = a.village ?? a.town ?? a.city ?? a.county ?? a.state;
+    return place ? `Farm near ${place}` : 'Your Farm';
   } catch {
     return 'Your Farm';
   }

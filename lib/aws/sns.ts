@@ -6,11 +6,12 @@ import {
   VerifySMSSandboxPhoneNumberCommand,
   type PublishCommandInput,
 } from '@aws-sdk/client-sns';
+import { toIndiaPhone } from '@/lib/phone';
 
 const sns = new SNSClient({ region: process.env.SNS_REGION ?? 'ap-south-1' });
 
 export function normalizePhoneNumber(phoneNumber: string): string {
-  return phoneNumber.startsWith('+') ? phoneNumber : `+91${phoneNumber}`;
+  return toIndiaPhone(phoneNumber);
 }
 
 export async function sendSMS(phoneNumber: string, message: string): Promise<void> {

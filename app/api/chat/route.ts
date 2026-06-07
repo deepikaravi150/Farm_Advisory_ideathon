@@ -49,6 +49,8 @@ const ChatSchema = z.object({
   message: z.string().min(1),
   locale: z.enum(['en', 'hi', 'ta']).default('en'),
   history: HistorySchema,
+  chatId: z.string().optional(),
+  chatTimestamp: z.string().optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -65,6 +67,8 @@ export async function POST(req: NextRequest) {
     let message: string;
     let locale: 'en' | 'hi' | 'ta';
     let history: Message[];
+    let chatId: string | undefined;
+    let chatTimestamp: string | undefined;
     let imageFile: File | null = null;
 
     if (isMultipart) {
@@ -81,11 +85,15 @@ export async function POST(req: NextRequest) {
       let parsedHistory: unknown = [];
       try { parsedHistory = JSON.parse(String(form.get('history') ?? '[]')); } catch { parsedHistory = []; }
       history = HistorySchema.parse(Array.isArray(parsedHistory) ? parsedHistory : []);
+      chatId = String(form.get('chatId') ?? '') || undefined;
+      chatTimestamp = String(form.get('chatTimestamp') ?? '') || undefined;
     } else {
       const parsed = ChatSchema.parse(await req.json());
       message = parsed.message;
       locale = parsed.locale;
       history = parsed.history;
+      chatId = parsed.chatId;
+      chatTimestamp = parsed.chatTimestamp;
     }
 
     // If a crop photo was attached, diagnose it via vision and fold the findings
@@ -153,25 +161,25 @@ export async function POST(req: NextRequest) {
     const contextSummaries = recentChats.map((c) => c.summary).filter(Boolean).join('\n');
     const memoryContext = formatMemoryForPrompt(profile?.memory as Fact[] | undefined);
 
-    // Live weather for the farmer's land (centroid of land boundary, else Chennai).
+    // Live weather for the farmer's saved land centroid.
     // Kept best-effort so chat still works if the weather API is unavailable.
     let weatherContext = '';
     try {
       const coords = profile?.land_coordinates as Array<{ lat: number; lng: number }> | undefined;
-      const { lat, lng } = coords?.length
-        ? extractCentroid(coords)
-        : { lat: 13.0827, lng: 80.2707 };
-      const [current, forecast] = await Promise.all([
-        getCurrentWeather(lat, lng),
-        get15DayForecast(lat, lng),
-      ]);
-      const next5 = forecast.slice(0, 5).map(
-        (d) => `${d.date}: ${d.description}, ${d.temp_min}–${d.temp_max}°C, rain ${d.rain_mm}mm`
-      ).join('\n');
-      weatherContext = `Live weather for ${current.city} (the farmer's land):
+      if (coords?.length) {
+        const { lat, lng } = extractCentroid(coords);
+        const [current, forecast] = await Promise.all([
+          getCurrentWeather(lat, lng),
+          get15DayForecast(lat, lng),
+        ]);
+        const next5 = forecast.slice(0, 5).map(
+          (d) => `${d.date}: ${d.description}, ${d.temp_min}–${d.temp_max}°C, rain ${d.rain_mm}mm`
+        ).join('\n');
+        weatherContext = `Live weather for ${current.city} (the farmer's land):
 - Now: ${current.temp}°C (feels ${current.feels_like}°C), ${current.description}, humidity ${current.humidity}%, wind ${current.wind_speed} km/h
 - Next 5 days:
 ${next5}`;
+      }
     } catch (e) {
       console.error('Weather context fetch failed:', e);
     }
@@ -224,20 +232,36 @@ Response rules:
     const fullConversation = [...messages, { role: 'assistant' as const, content: reply }];
     const conversationText = fullConversation.map(m => `${m.role}: ${m.content}`).join('\n');
     const existingFacts = (profile?.memory as Fact[] | undefined) ?? [];
+    const savedChatId = chatId ?? generateId();
+    const savedTimestamp = chatTimestamp ?? new Date().toISOString();
 
     Promise.all([
       summarizeText(conversationText),
       extractFarmingContextTags(conversationText),
       extractFarmerFacts(conversationText, existingFacts),
     ]).then(([summary, tags, mergedFacts]) => {
-      putItem(Tables.CHAT_HISTORY, {
-        farmer_id: farmer.farmerId,
-        timestamp: new Date().toISOString(),
-        chat_id: generateId(),
-        messages: fullConversation,
-        summary,
-        farming_context_tags: tags,
-      }).catch(console.error);
+      if (chatId && chatTimestamp) {
+        updateItem({
+          TableName: Tables.CHAT_HISTORY,
+          Key: { farmer_id: farmer.farmerId, timestamp: chatTimestamp },
+          UpdateExpression: 'SET messages = :messages, summary = :summary, farming_context_tags = :tags, chat_id = :chatId',
+          ExpressionAttributeValues: {
+            ':messages': fullConversation,
+            ':summary': summary,
+            ':tags': tags,
+            ':chatId': chatId,
+          },
+        }).catch(console.error);
+      } else {
+        putItem(Tables.CHAT_HISTORY, {
+          farmer_id: farmer.farmerId,
+          timestamp: savedTimestamp,
+          chat_id: savedChatId,
+          messages: fullConversation,
+          summary,
+          farming_context_tags: tags,
+        }).catch(console.error);
+      }
 
       // Persist the updated long-term farmer memory only when it changed.
       if (JSON.stringify(mergedFacts) !== JSON.stringify(existingFacts)) {
@@ -250,7 +274,7 @@ Response rules:
       }
     }).catch(console.error);
 
-    return NextResponse.json({ reply, locale, diagnosis, s3Key: cropImageKey });
+    return NextResponse.json({ reply, locale, diagnosis, s3Key: cropImageKey, chatId: savedChatId, timestamp: savedTimestamp });
   } catch (err) {
     if (err instanceof z.ZodError) return NextResponse.json({ error: err.errors }, { status: 400 });
     console.error('Chat error:', err);

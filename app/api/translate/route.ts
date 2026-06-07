@@ -172,6 +172,9 @@ ${JSON.stringify(payload)}`;
   } catch (err) {
     if (err instanceof z.ZodError) return NextResponse.json({ error: err.errors }, { status: 400 });
     console.error('Translation failed:', err);
+    if (parsedBody?.locale === 'en') {
+      return NextResponse.json({ payload: parsedBody.payload });
+    }
     if (parsedBody?.locale === 'ta' || parsedBody?.locale === 'hi') {
       return NextResponse.json({ payload: localTranslate(parsedBody.payload, parsedBody.locale) });
     }

@@ -42,23 +42,6 @@ const QUESTIONS: Question[] = [
   { key: 'fertilizers', type: 'single', values: ['None', 'Chemical', 'Organic', 'Both chemical & organic'] },
 ];
 
-const CROP_OPTIONS = [
-  'Paddy',
-  'Groundnut',
-  'Maize',
-  'Sugarcane',
-  'Cotton',
-  'Tomato',
-  'Brinjal',
-  'Chilli',
-  'Banana',
-  'Turmeric',
-  'Black gram',
-  'Green gram',
-  'Sesame',
-  'Millets',
-];
-
 export default function StateAssessmentModal({ onSubmit, loading, onClose }: Props) {
   const t = useTranslations('assessment');
   const tc = useTranslations('common');
@@ -88,6 +71,13 @@ export default function StateAssessmentModal({ onSubmit, loading, onClose }: Pro
   function setAnswer(key: string, value: string) {
     if (key === 'cropName') setCropName(value);
     setAnswers(prev => ({ ...prev, [key]: value }));
+  }
+
+  function acceptCropAndAdvance() {
+    const accepted = cropName.trim();
+    if (!accepted) return;
+    setAnswer('cropName', accepted);
+    advance();
   }
 
   function advance() {
@@ -196,18 +186,20 @@ export default function StateAssessmentModal({ onSubmit, loading, onClose }: Pro
 
             {current.type === 'crop' && (
               <div className="space-y-3">
-                <select
+                <input
                   autoFocus
                   value={cropName}
                   onChange={e => setAnswer(current.key, e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      acceptCropAndAdvance();
+                    }
+                  }}
+                  placeholder={t('finalCropPlaceholder')}
                   className="w-full border border-gray-300 rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-400 bg-white"
-                >
-                  <option value="">{t('finalCropPlaceholder')}</option>
-                  {CROP_OPTIONS.map(crop => (
-                    <option key={crop} value={crop}>{crop}</option>
-                  ))}
-                </select>
-                <button onClick={advance}
+                />
+                <button onClick={acceptCropAndAdvance}
                   disabled={!cropName.trim()}
                   className="w-full bg-brand-600 text-white py-2.5 rounded-xl hover:bg-brand-700 disabled:opacity-40">
                   {tc('next')}
@@ -221,7 +213,12 @@ export default function StateAssessmentModal({ onSubmit, loading, onClose }: Pro
                   autoFocus
                   value={answers[current.key] ?? ''}
                   onChange={e => setAnswer(current.key, e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') advance(); }}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && (current.optional || (answers[current.key] ?? '').trim())) {
+                      e.preventDefault();
+                      advance();
+                    }
+                  }}
                   placeholder={t(`${current.key}.ph`)}
                   className="w-full border border-gray-300 rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-400"
                 />
@@ -237,8 +234,20 @@ export default function StateAssessmentModal({ onSubmit, loading, onClose }: Pro
 
         {/* Step 3 — situation-specific final input + submit */}
         {phase === 'final' && (
-          <div className="space-y-4">
-            <button onClick={() => { setIdx(visible.length - 1); setPhase('questions'); }}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (
+                !loading &&
+                cropName.trim() &&
+                (state !== 'mid_grow' || info.trim())
+              ) {
+                submitFinal();
+              }
+            }}
+            className="space-y-4"
+          >
+            <button type="button" onClick={() => { setIdx(visible.length - 1); setPhase('questions'); }}
               className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600">
               <ChevronLeft className="w-3.5 h-3.5" /> {tc('back')}
             </button>
@@ -269,7 +278,7 @@ export default function StateAssessmentModal({ onSubmit, loading, onClose }: Pro
               </div>
             )}
 
-            <button onClick={submitFinal}
+            <button type="submit"
               disabled={
                 loading ||
                 !cropName.trim() ||
@@ -279,7 +288,7 @@ export default function StateAssessmentModal({ onSubmit, loading, onClose }: Pro
               {loading && <Loader2 className="w-4 h-4 animate-spin" />}
               Save New Plan
             </button>
-          </div>
+          </form>
         )}
       </div>
     </div>

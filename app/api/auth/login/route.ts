@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { comparePassword, signToken } from '@/lib/auth';
 import { findFarmersByPhone } from '@/app/api/auth/farmers';
+import { updateItem, Tables } from '@/lib/aws/dynamodb';
+import { toTenDigitPhone } from '@/lib/phone';
 
 function requireAwsEnv() {
   const missing = ['AWS_REGION', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY'].filter(key => !process.env[key]);
@@ -11,15 +13,16 @@ function requireAwsEnv() {
 }
 
 const LoginSchema = z.object({
-  phone: z.string().regex(/^\d{10}$/),
+  phone: z.preprocess((value) => toTenDigitPhone(String(value ?? '')), z.string().regex(/^\d{10}$/)),
   password: z.string().min(1),
+  locale: z.enum(['en', 'hi', 'ta']).optional(),
 });
 
 export async function POST(req: NextRequest) {
   try {
     requireAwsEnv();
     const body = await req.json();
-    const { phone, password } = LoginSchema.parse(body);
+    const { phone, password, locale } = LoginSchema.parse(body);
 
     // Lookup by phone using shared helper that handles missing phone-index gracefully
     const results = await findFarmersByPhone(phone);
@@ -39,6 +42,16 @@ export async function POST(req: NextRequest) {
       phone: farmer.phone as string,
       name: farmer.name as string,
     });
+    const selectedLocale = locale ?? (farmer.preferred_language as string | undefined) ?? 'en';
+
+    if (locale && locale !== farmer.preferred_language) {
+      await updateItem({
+        TableName: Tables.FARMER_PROFILES,
+        Key: { farmer_id: farmer.farmer_id },
+        UpdateExpression: 'SET preferred_language = :locale',
+        ExpressionAttributeValues: { ':locale': locale },
+      });
+    }
 
     const response = NextResponse.json({
       success: true,
@@ -46,7 +59,7 @@ export async function POST(req: NextRequest) {
         farmerId: farmer.farmer_id,
         name: farmer.name,
         phone: farmer.phone,
-        preferredLanguage: farmer.preferred_language ?? 'en',
+        preferredLanguage: selectedLocale,
       },
     });
 
@@ -58,6 +71,11 @@ export async function POST(req: NextRequest) {
       secure: process.env.COOKIE_SECURE === 'true',
       sameSite: 'lax',
       maxAge: 60 * 60 * 24 * 7,
+      path: '/',
+    });
+    response.cookies.set('locale', selectedLocale, {
+      sameSite: 'lax',
+      maxAge: 60 * 60 * 24 * 365,
       path: '/',
     });
 

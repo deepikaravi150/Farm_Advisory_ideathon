@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { verifyPhoneVerificationOtp } from '@/lib/aws/sns';
 import { findFarmersByPhone } from '@/app/api/auth/farmers';
+import { toTenDigitPhone } from '@/lib/phone';
 import { updateItem, Tables } from '@/lib/aws/dynamodb';
 
 const VerifyOtpSchema = z.object({
-  phone: z.string().regex(/^\d{10}$/, 'Enter a valid 10-digit phone number'),
+  phone: z.preprocess((value) => toTenDigitPhone(String(value ?? '')), z.string().regex(/^\d{10}$/, 'Enter a valid 10-digit phone number')),
   otp: z.string().regex(/^\d{6}$/, 'Enter the 6-digit OTP'),
 });
 

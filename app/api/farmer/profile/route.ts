@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getItem, updateItem, Tables } from '@/lib/aws/dynamodb';
 import { verifyToken } from '@/lib/auth';
+import { mirrorProfileToS3, tryMirror } from '@/lib/farmer-s3-store';
 
 function getAuthFarmer(req: NextRequest) {
   const token = req.cookies.get('auth_token')?.value;
@@ -25,7 +26,6 @@ const UpdateSchema = z.object({
   name: z.string().optional(),
   typography: z.string().optional(),
   landAreaAcres: z.number().optional(),
-  preferredLanguage: z.enum(['en', 'hi', 'ta']).optional(),
   landPictureS3Key: z.string().optional(),
 });
 
@@ -44,7 +44,6 @@ export async function PATCH(req: NextRequest) {
     if (data.name) { updates.push('#n = :n'); names['#n'] = 'name'; values[':n'] = data.name; }
     if (data.typography) { updates.push('typography = :t'); values[':t'] = data.typography; }
     if (data.landAreaAcres) { updates.push('land_area_acres = :la'); values[':la'] = data.landAreaAcres; }
-    if (data.preferredLanguage) { updates.push('preferred_language = :pl'); values[':pl'] = data.preferredLanguage; }
     if (data.landPictureS3Key) { updates.push('land_picture_s3_key = :lp'); values[':lp'] = data.landPictureS3Key; }
 
     if (!updates.length) return NextResponse.json({ error: 'Nothing to update' }, { status: 400 });
@@ -56,6 +55,9 @@ export async function PATCH(req: NextRequest) {
       ExpressionAttributeValues: values,
       ...(Object.keys(names).length ? { ExpressionAttributeNames: names } : {}),
     });
+
+    const updated = await getItem(Tables.FARMER_PROFILES, { farmer_id: farmer.farmerId });
+    if (updated) await tryMirror('farmer profile update', () => mirrorProfileToS3(updated));
 
     return NextResponse.json({ success: true });
   } catch (err) {

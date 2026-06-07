@@ -5,6 +5,8 @@ import { hashPassword } from '@/lib/auth';
 import { generateId } from '@/lib/utils';
 import { findFarmersByPhone } from '@/app/api/auth/farmers';
 import { verifyPhoneVerificationOtp } from '@/lib/aws/sns';
+import { toTenDigitPhone } from '@/lib/phone';
+import { mirrorProfileToS3, tryMirror } from '@/lib/farmer-s3-store';
 
 function requireAwsEnv() {
   const missing = ['AWS_REGION', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY'].filter(key => !process.env[key]);
@@ -21,9 +23,11 @@ const PasswordSchema = z.string()
   .regex(/[^A-Za-z0-9]/, 'Password must include a special character');
 
 const RegisterSchema = z.object({
-  farmerId: z.string().min(1, 'Farmer ID is required'),
+  farmerId: z.string()
+    .transform((value) => value.trim().toUpperCase())
+    .pipe(z.string().regex(/^TN\d{11}$/, 'Farmer ID must be TN followed by 11 digits')),
   name: z.string().min(2, 'Name is required'),
-  phone: z.string().regex(/^\d{10}$/, 'Enter a valid 10-digit phone number'),
+  phone: z.preprocess((value) => toTenDigitPhone(String(value ?? '')), z.string().regex(/^\d{10}$/, 'Enter a valid 10-digit phone number')),
   address: z.string().min(3, 'Address is required'),
   landCoordinates: z.array(z.object({ lat: z.number(), lng: z.number() })).min(3),
   typography: z.string().optional(),
@@ -31,6 +35,7 @@ const RegisterSchema = z.object({
   landPictureS3Key: z.string().optional(),
   password: PasswordSchema,
   otp: z.string().regex(/^\d{6}$/, 'Enter the 6-digit OTP sent to the phone number'),
+  preferredLanguage: z.enum(['en', 'hi', 'ta']).default('en'),
 });
 
 export async function POST(req: NextRequest) {
@@ -55,7 +60,7 @@ export async function POST(req: NextRequest) {
     const passwordHash = await hashPassword(data.password);
     const uniqueId = generateId();
 
-    await putItem(Tables.FARMER_PROFILES, {
+    const profileItem = {
       farmer_id: data.farmerId,
       unique_id: uniqueId,
       phone: data.phone,
@@ -68,9 +73,12 @@ export async function POST(req: NextRequest) {
       phone_verified: true,
       phone_verified_at: new Date().toISOString(),
       password_hash: passwordHash,
-      preferred_language: 'en',
+      preferred_language: data.preferredLanguage,
       created_at: new Date().toISOString(),
-    });
+    };
+
+    await putItem(Tables.FARMER_PROFILES, profileItem);
+    await tryMirror('farmer profile register', () => mirrorProfileToS3(profileItem));
 
     return NextResponse.json({ success: true, farmerId: data.farmerId });
   } catch (err) {

@@ -154,3 +154,7 @@ export function getCropInfo(name: string | undefined | null): CropInfo | null {
 
   return null;
 }
+
+export function getAllCropInfos(): CropInfo[] {
+  return Object.keys(CROPS).map((key) => ({ key, ...CROPS[key] }));
+}

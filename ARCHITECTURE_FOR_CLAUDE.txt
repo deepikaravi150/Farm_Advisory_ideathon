@@ -1,5 +1,6 @@
 FarmAdvisor / Farm_Advisory_ideathon - Full Architecture Reference
 Generated on: 2026-06-05
+Last updated: 2026-06-07
 Purpose: This file is written as a complete text brief that can be given to Claude or any diagramming tool to create a full application architecture diagram.
 
 ================================================================================
@@ -8,14 +9,19 @@ Purpose: This file is written as a complete text brief that can be given to Clau
 
 FarmAdvisor is a multilingual AI-powered farm advisory web application for Tamil Nadu farmers. It is built with Next.js App Router and provides:
 
-- Farmer registration and login with JWT cookie authentication.
+- Farmer registration and login with JWT cookie authentication and +91 India mobile number handling.
+- AWS SNS phone OTP verification during registration.
 - Farmer profile management with land details, address, phone, land area, land photo, and preferred language.
-- Dashboard with weather, land/map information, recent chats, government schemes, and advisor access.
+- Dashboard with live farm-weather, land/map information, market prices, soil health, suitable crop suggestions, recent chats, and advisor access.
 - AI chat assistant with RAG knowledge retrieval, farmer memory, weather, soil report, crop plans, and optional crop image diagnosis.
 - Crop planning workflow that creates AI-generated crop schedules based on farmer profile, crop, land, weather forecast, soil report, and assessment answers.
 - Saved crop plans with active/inactive status. Multiple plans can be active.
 - Current plan widgets derived from the active plan stage, active date, crop, soil report, weather, water, land, fertilizer, manure, and pesticide needs.
 - Soil report upload and extraction using OpenAI vision/file processing. Original PDF/image and extracted JSON are stored in S3, and normalized report data is stored in DynamoDB.
+- District and soil based crop suitability ranking through /api/crop-options and lib/crop-suitability.ts.
+- Mandi/market price widget using the data.gov.in Agmarknet API, not S3.
+- Daily SMS Draft dashboard widget plus manual send using AWS SNS.
+- Automatic 8:00 AM IST daily SMS scheduler for active crop plans.
 - Government schemes carousel and schemes API.
 - Voice input/output using OpenAI speech APIs.
 - SMS notification route using AWS SNS.
@@ -59,9 +65,53 @@ Cloud / Data:
 - Qdrant vector database for knowledge base retrieval
 
 External Data:
-- Open-Meteo forecast API for current weather and 16-day forecast
-- Nominatim reverse geocoding for weather city/farm label
+- Open-Meteo forecast API for current weather and 15/16-day forecast
+- Nominatim reverse geocoding for "Farm near <place>" weather label
 - Data.gov.in Agmarknet API for market prices
+
+Current important implementation notes:
+- Weather uses farmer_profiles.land_coordinates only. The old Chennai fallback has been removed.
+- Dashboard map displays the farmer's selected land polygon and supports zoom controls.
+- Recent chats load into the existing dashboard chatbot via /dashboard?chat=<id>; /chat/[id] redirects there.
+- Soil upload exists only on Profile. Dashboard and crop-plan pages display/translate saved soil report details.
+- New-plan crop entry is a plain text input. The farmer can enter any crop name; the app uses exactly that input.
+- Suitable crops are shown as a dashboard widget and are ranked by saved farm address/district plus soil pH and N/P/K.
+- Dashboard Daily SMS Draft is shown horizontally below Suitable Crops and follows the current page language.
+- Dashboard active crop plan widgets show all active plans, not only one.
+- Dashboard active crop plan text has a local Tamil/Hindi fallback for crop names, stage names, tasks, and alert advice when API translation is unavailable.
+- Daily SMS preview/manual send/automatic send include all active crop plans.
+- Automatic Daily SMS uses the farmer's saved preferred_language.
+- Farmer profile JSON, crop plan JSON, original soil report files, and soil extraction JSON are mirrored into farmer-specific S3 folders.
+- Farmer ID format is TN followed by exactly 11 digits, e.g. TN12345678901.
+- Profile farmer-memory facts are stored in English for stable LLM prompting, but the Profile page renders known land facts in the current page language.
+
+Data update model:
+- farmer_profiles is the source of truth for farmer identity, contact, preferred language, address, land polygon, land area/type, land image key, and memory facts.
+- Profile registration/update writes to DynamoDB and mirrors safe profile JSON to S3 at <farmerId>/profile/profile.json.
+- farmer memory is updated by app/api/farmer/memory/route.ts and by chat memory extraction in app/api/chat/route.ts. The same memory is injected into chat and crop-plan prompts.
+- soil_reports is the source of truth for extracted lab soil values. Uploading a soil report stores the original file in S3, stores extraction JSON in S3, and stores normalized report data in DynamoDB.
+- crop_plans is the source of truth for crop plan schedules and active/inactive state. Create/save/activate/deactivate mirrors plan JSON to S3; delete removes the mirrored S3 plan JSON.
+- Weather and mandi prices are not stored as long-term farmer data. Weather is fetched live/near-live from Open-Meteo using the farm centroid. Mandi prices are fetched from data.gov.in Agmarknet API.
+- Daily SMS preview reads current data only. Manual send and automatic 8:00 AM IST cron send through AWS SNS.
+
+Example data-to-advice path:
+- Farmer TN12345678901 registers with 2 acres near Kalasapakkam and Tamil as preferred language.
+- The farmer uploads a soil report showing pH 6.6, EC 0.11, low nitrogen, low phosphorus, medium potassium, and low organic carbon.
+- The uploaded report is saved as:
+  - <farmerId>/soil-reports/<reportId>/original.<ext>
+  - <farmerId>/soil-reports/<reportId>/extraction.json
+  - DynamoDB soil_reports normalized fields.
+- The farmer has two active crop plans: Chilli and Black gram.
+- Dashboard Active Crop Plans renders both active plans, each with its current stage, stage dates, tasks, weather risk, and action guidance.
+- Dashboard Soil Health reads the same uploaded soil report and explains pH/N/P/K status in the selected language.
+- Suitable Crops ranks crops using district/address plus pH/N/P/K; pulses such as Black gram or Green gram can be suggested because they fit pH 6.6 and can help improve nitrogen.
+- Daily SMS combines both active plans into one short message:
+  - Chilli current stage and field work
+  - Black gram current stage and field work
+  - weather warning or safe-action point
+  - soil pH/N/P/K guidance
+  - fertilizer/manure/pest reminders
+- If Black gram is deactivated or deleted, it is removed from DynamoDB active-plan queries, the S3 plan mirror is updated/removed, and the dashboard/SMS only use the remaining active plans.
 
 ================================================================================
 3. PROJECT STRUCTURE
@@ -86,15 +136,21 @@ App routes:
 - app/dashboard/page.tsx: authenticated farmer dashboard
 - app/crop-plan/page.tsx: crop planning and saved/current plan screen
 - app/profile/page.tsx: profile, farmer memory, and soil report upload
-- app/chat/[id]/page.tsx: chat detail page
+- app/chat/[id]/page.tsx: legacy chat detail route; redirects to /dashboard?chat=<id>
 
 API routes:
 - app/api/auth/register/route.ts
 - app/api/auth/login/route.ts
 - app/api/auth/farmers.ts
+- app/api/auth/otp/send/route.ts
+- app/api/auth/otp/verify/route.ts
+- app/api/auth/otp/status/route.ts
 - app/api/chat/route.ts
 - app/api/crop-plan/route.ts
 - app/api/crop-plan/chat/route.ts
+- app/api/crop-options/route.ts
+- app/api/daily-sms/route.ts
+- app/api/cron/daily-sms/route.ts
 - app/api/farmer/profile/route.ts
 - app/api/farmer/memory/route.ts
 - app/api/soil/upload/route.ts
@@ -114,6 +170,7 @@ Library folders:
 - lib/aws/dynamodb.ts: DynamoDB document client and helpers
 - lib/aws/s3.ts: S3 upload and presigned URL helpers
 - lib/aws/sns.ts: SMS helpers
+- lib/phone.ts: India phone normalization helpers for +91 and 10 digit local numbers
 - lib/aws/polly.ts: Polly wrapper
 - lib/aws/transcribe.ts: Transcribe wrapper
 - lib/ai/openai.ts: OpenAI chat, embeddings, document extraction, speech, summarization, memory extraction
@@ -124,7 +181,10 @@ Library folders:
 - lib/memory.ts: durable farmer memory facts
 - lib/crop-doctor.ts: crop image diagnosis prompt/parser
 - lib/crop-info.ts: crop metadata and advisory helpers
+- lib/crop-suitability.ts: district + soil based crop ranking
+- lib/daily-sms.ts: daily crop/weather/soil SMS drafting and SNS send orchestration
 - lib/farm-advice.ts: farm recommendation helpers
+- lib/farmer-s3-store.ts: farmer-scoped S3 JSON/file mirroring helpers
 - lib/i18n.ts: next-intl message loading
 - lib/utils.ts: IDs, helpers, formatting
 
@@ -132,7 +192,7 @@ Component folders:
 - components/layout: Navbar, LanguageSwitcher, LocationSelector
 - components/landing: HeroSection, SchemesCarousel, landing feature sections
 - components/register: FarmerDetailsForm, LandMapSelector
-- components/dashboard: WeatherWidget, LandMap, RecentChats, dashboard cards
+- components/dashboard: WeatherWidget, LandMap, SuitableCropsWidget, RecentChats, dashboard cards
 - components/chatbot: ChatPanel, VoiceInput, VoiceOutput
 - components/crop-plan: plan creation, assessment, timeline, current stage widgets, plan assistant
 - components/profile: ProfileCard, SoilReportUpload, FarmerMemorySection
@@ -173,6 +233,7 @@ Middleware:
 Important auth API routes:
 - POST /api/auth/register:
   - Validates farmer profile fields with Zod.
+  - Requires farmerId to match TN followed by exactly 11 digits.
   - Checks duplicate farmer_id and phone.
   - Uses DynamoDB phone-index where available, with scan fallback.
   - Stores farmer profile in DynamoDB farmer_profiles.
@@ -226,6 +287,10 @@ Dynamic content translation:
 Important behavior expectation:
 - When the farmer changes language, both static UI labels and dynamic database/LLM content should be re-rendered or translated to the selected locale.
 - Crop plan milestones, weather warnings, current plan widgets, soil report text, chat assistant content, government scheme text, and crop detail widgets should all use the selected language.
+- Dashboard Daily SMS Draft refetches with GET /api/daily-sms?locale=<selected-locale>, so the preview follows the page language.
+- Manual Daily SMS Send posts { locale } to /api/daily-sms, so the manually sent message follows the page language.
+- Automatic scheduled SMS uses the saved farmer preferred_language, not the temporary page language.
+- Dashboard Active Crop Plans card localizes active plan display text and applies local Tamil/Hindi fallbacks for common crop-plan phrases when API translation is incomplete.
 
 ================================================================================
 6. DATA STORAGE ARCHITECTURE
@@ -340,13 +405,24 @@ S3 bucket:
   - farmer land images
   - soil report PDFs/images
   - soil extraction JSON
+  - safe farmer profile JSON mirror
+  - crop plan JSON mirrors
   - crop images for diagnosis where applicable
 
 S3 key pattern:
 - buildS3Key(farmerId, type, filename)
 - General shape: <farmerId>/<type>/<timestamp>-<filename>
-- Soil extraction JSON shape:
-  - <farmerId>/soil/<reportId>-soil-report-extraction.json
+- Farmer-scoped canonical JSON/file folders:
+  - <farmerId>/profile/profile.json
+  - <farmerId>/crop-plans/<planId>/plan.json
+  - <farmerId>/soil-reports/<reportId>/original.<ext>
+  - <farmerId>/soil-reports/<reportId>/extraction.json
+
+S3 mirroring behavior:
+- Registration and profile update mirror safe profile JSON to S3.
+- Crop plan create/save/activate/deactivate mirrors plan JSON to S3.
+- Crop plan delete removes the mirrored S3 plan JSON.
+- Soil report upload stores the original file and extracted JSON in the report folder.
 
 Duplicate soil report behavior:
 - Soil upload computes SHA-256 hash of the uploaded file.
@@ -460,8 +536,8 @@ Weather route flow:
 1. Authenticate farmer using auth_token.
 2. Read farmer profile from DynamoDB.
 3. Extract centroid from land_coordinates.
-4. If no coordinates exist, use fallback Chennai coordinates.
-5. Fetch current weather and 16-day forecast.
+4. If no coordinates exist, return weather unavailable instead of using a fallback city.
+5. Fetch current weather and 16-day forecast from the farmer land centroid.
 6. Return current weather and forecast to dashboard/crop-plan.
 
 Weather data structure:
@@ -708,7 +784,7 @@ Chat request flow:
    - latest crop plans
    - recent chat summaries
    - RAG context from Qdrant
-5. Fetch live weather from farmer land centroid or fallback.
+5. Fetch live weather from farmer land centroid; if coordinates are missing, continue without weather instead of using another location.
 6. Build system prompt in selected language.
 7. Include:
    - profile
@@ -785,14 +861,25 @@ Major components:
 - WeatherWidget
 - LandMap
 - RecentChats
+- SuitableCropsWidget
+- DailySmsWidget
 - Farm Advisor chat panel
 - Profile/crop/market/scheme navigation widgets
 
 Dashboard data:
 - Authenticated farmer profile
 - Weather API response
+- Latest soil report
+- All active crop plans
 - Recent chat history
 - Land coordinates and land area
+
+Active Crop Plans dashboard card:
+- Reads all crop_plans with status active from the dashboard server query.
+- Shifts milestone dates based on active_from, matching the crop-plan page behavior.
+- Displays each active crop's current/upcoming stage, task details, and alert advice.
+- If a plan is deactivated or deleted, it disappears from the dashboard card.
+- Uses /api/translate plus local Tamil/Hindi fallback text replacement so the card follows the selected page language.
 
 WeatherWidget:
 - Shows current weather.
@@ -803,6 +890,13 @@ WeatherWidget:
 LandMap:
 - Shows farmer land boundary/location.
 - Should not highlight the map when climate details overlay is open unless intentionally selected.
+
+DailySmsWidget:
+- Sits below SuitableCropsWidget in the main dashboard column.
+- Uses a horizontal desktop layout with draft text on the left and language/phone/send controls on the right.
+- GET /api/daily-sms?locale=<current-locale> loads the preview in the active page language.
+- POST /api/daily-sms with { locale } sends the preview language through AWS SNS.
+- Includes every active crop plan in the draft, not only the first active plan.
 
 ================================================================================
 15. PROFILE PAGE ARCHITECTURE
@@ -918,6 +1012,9 @@ Frontend:
 API:
 - POST /api/notifications/sms
 - GET /api/notifications/sms
+- GET /api/daily-sms
+- POST /api/daily-sms
+- GET /api/cron/daily-sms
 
 POST flow:
 1. Authenticate farmer.
@@ -934,6 +1031,19 @@ SMS types:
 GET flow:
 - Admin-only placeholder weather check endpoint protected by x-admin-secret.
 - Intended for cron/scheduler to check active crop plans and weather risk.
+
+Daily SMS preview/send:
+1. Dashboard calls GET /api/daily-sms?locale=<page-locale>.
+2. API reads farmer profile, all active crop plans, latest soil report, and farm weather.
+3. lib/daily-sms.ts drafts a short numbered SMS using all active crop stages, weather risk, soil pH/N/P/K, nutrient/fertilizer reminders, and pest/disease check.
+4. The draft is translated/generated in the current page language.
+5. Manual Send calls POST /api/daily-sms with { locale } and sends through AWS SNS to the farmer phone.
+
+Automatic daily SMS:
+1. vercel.json schedules /api/cron/daily-sms at 30 2 * * *.
+2. 30 2 UTC equals 8:00 AM IST.
+3. Cron route validates Vercel cron header or CRON_SECRET.
+4. It scans eligible verified farmers, finds all active crop plans, drafts messages using each farmer's saved preferred_language, and sends through AWS SNS.
 
 ================================================================================
 20. PRESIGNED UPLOAD ARCHITECTURE
@@ -985,6 +1095,12 @@ PlanChatPanel -> /api/crop-plan/chat -> selected plan + soil + weather + memory 
 I. Language change:
 LanguageSwitcher -> selected locale -> next-intl UI messages update -> dynamic content sent to /api/translate -> translated crop/soil/current details rendered
 
+J. Daily SMS:
+Dashboard -> DailySmsWidget -> /api/daily-sms?locale=<page-locale> -> profile + all active crop plans + soil + weather -> lib/daily-sms -> preview in page language -> POST /api/daily-sms -> AWS SNS
+
+K. Automatic 8:00 AM SMS:
+Vercel Cron -> /api/cron/daily-sms -> verified farmers + active crop plans -> lib/daily-sms using profile preferred_language -> AWS SNS
+
 ================================================================================
 22. ENVIRONMENT VARIABLES
 ================================================================================
@@ -1008,6 +1124,7 @@ Qdrant:
 Admin / data:
 - ADMIN_SECRET
 - DATA_GOV_IN_API_KEY
+- CRON_SECRET
 
 Optional speech/AWS wrappers:
 - AWS Polly and Transcribe clients use AWS credentials/region.
@@ -1083,6 +1200,8 @@ Layer 3 - API Routes:
 - Speech APIs
 - Presigned Upload API
 - SMS API
+- Daily SMS API
+- Daily SMS Cron API
 - Schemes API
 
 Layer 4 - Internal Libraries:
@@ -1097,6 +1216,8 @@ Layer 4 - Internal Libraries:
 - lib/crop-plan-weather
 - lib/memory
 - lib/crop-doctor
+- lib/daily-sms
+- lib/farmer-s3-store
 
 Layer 5 - External Services:
 - OpenAI
@@ -1129,6 +1250,9 @@ Recommended diagram edges:
 - Soil reports -> Crop Plan API and Chat API
 - Farmer memory -> Chat API and Crop Plan API
 - Active crop plans -> Current Plan Widgets and SMS scheduler concept
+- DailySmsWidget -> Daily SMS API -> AWS SNS
+- Vercel Cron -> Daily SMS Cron API -> AWS SNS
+- Profile/Crop Plan/Soil APIs -> farmer-s3-store -> S3 farmer folders
 - SchemesCarousel -> Schemes API -> DynamoDB government_schemes
 
 Suggested title:

@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { User, Phone, MapPin, Layers, Edit2, Save, X } from 'lucide-react';
+import { toIndiaPhone } from '@/lib/phone';
 
 interface Profile {
   farmer_id: string;
@@ -21,7 +22,7 @@ export default function ProfileCard({ profile, onSave }: Props) {
   const tc = useTranslations('common');
   const addressLabel = t.has('address') ? t('address') : 'Farm address';
   const [editing, setEditing] = useState(false);
-  const [form, setForm] = useState({ name: profile.name, typography: profile.typography, landAreaAcres: profile.land_area_acres, preferredLanguage: profile.preferred_language });
+  const [form, setForm] = useState({ name: profile.name, typography: profile.typography, landAreaAcres: profile.land_area_acres });
   const [saving, setSaving] = useState(false);
 
   async function save() {
@@ -65,7 +66,7 @@ export default function ProfileCard({ profile, onSave }: Props) {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
         <div className="flex items-center gap-3 bg-gray-50 rounded-xl p-3">
           <Phone className="w-4 h-4 text-gray-400" />
-          <div><p className="text-xs text-gray-400">{t('phone')}</p><p className="font-medium text-gray-700">{profile.phone}</p></div>
+          <div><p className="text-xs text-gray-400">{t('phone')}</p><p className="font-medium text-gray-700">{toIndiaPhone(profile.phone)}</p></div>
         </div>
         <div className="flex items-start gap-3 bg-gray-50 rounded-xl p-3 sm:col-span-2">
           <MapPin className="w-4 h-4 text-gray-400 mt-0.5" />
@@ -99,16 +100,7 @@ export default function ProfileCard({ profile, onSave }: Props) {
         <div className="flex items-center gap-3 bg-gray-50 rounded-xl p-3">
           <div className="w-4 h-4 text-gray-400 font-bold text-xs flex items-center justify-center">A</div>
           <div><p className="text-xs text-gray-400">{t('language')}</p>
-            {editing ? (
-              <select value={form.preferredLanguage} onChange={e => setForm({ ...form, preferredLanguage: e.target.value })}
-                className="font-medium border-b border-brand-400 outline-none">
-                <option value="en">English</option>
-                <option value="hi">हिन्दी</option>
-                <option value="ta">தமிழ்</option>
-              </select>
-            ) : (
-              <p className="font-medium text-gray-700">{{ en: 'English', hi: 'हिन्दी', ta: 'தமிழ்' }[profile.preferred_language] ?? profile.preferred_language}</p>
-            )}
+            <p className="font-medium text-gray-700">{{ en: 'English', hi: 'हिन्दी', ta: 'தமிழ்' }[profile.preferred_language] ?? profile.preferred_language}</p>
           </div>
         </div>
       </div>

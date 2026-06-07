@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { verifyToken } from '@/lib/auth';
-import { uploadToS3, buildS3Key } from '@/lib/aws/s3';
+import { uploadToS3 } from '@/lib/aws/s3';
 import { chatWithBedrock, extractTextFromDocument, extractTextFromPdfDocument } from '@/lib/ai/openai';
 import { putItem, queryItems, updateItem, Tables } from '@/lib/aws/dynamodb';
 import { generateId } from '@/lib/utils';
+import { farmerS3Keys, mirrorJsonToS3, tryMirror } from '@/lib/farmer-s3-store';
 
 function getAuthFarmer(req: NextRequest) {
   const token = req.cookies.get('auth_token')?.value;
@@ -95,6 +96,7 @@ function dbItemToSoilData(item: Record<string, unknown>) {
     recommendations: item.recommendations,
     labName: item.lab_name,
     reportDate: item.report_date,
+    locale: item.locale,
   };
 }
 
@@ -148,11 +150,10 @@ export async function POST(req: NextRequest) {
       await updateItem({
         TableName: Tables.SOIL_REPORTS,
         Key: { farmer_id: farmer.farmerId, uploaded_at: duplicate.uploaded_at },
-        UpdateExpression: 'SET is_current = :true, updated_at = :updated, locale = :locale',
+        UpdateExpression: 'SET is_current = :true, updated_at = :updated',
         ExpressionAttributeValues: {
           ':true': true,
           ':updated': new Date().toISOString(),
-          ':locale': locale,
         },
       });
 
@@ -166,7 +167,12 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const s3Key = buildS3Key(farmer.farmerId, 'soil', file.name);
+    const uploadedAt = new Date().toISOString();
+    const reportId = generateId();
+    const originalExt = file.type === 'application/pdf'
+      ? 'pdf'
+      : (file.name.split('.').pop() || file.type.split('/')[1] || 'file');
+    const s3Key = farmerS3Keys.soilOriginal(farmer.farmerId, reportId, originalExt);
     await uploadToS3(s3Key, buffer, file.type);
 
     const extractedText = file.type === 'application/pdf'
@@ -182,13 +188,11 @@ export async function POST(req: NextRequest) {
     if (!jsonMatch) throw new Error('AI did not return readable soil report data.');
     const soilData = JSON.parse(jsonMatch[0]);
 
-    const uploadedAt = new Date().toISOString();
-    const reportId = generateId();
-    const jsonS3Key = `${farmer.farmerId}/soil/${reportId}-soil-report-extraction.json`;
+    const jsonS3Key = farmerS3Keys.soilExtraction(farmer.farmerId, reportId);
 
-    await uploadToS3(
+    await mirrorJsonToS3(
       jsonS3Key,
-      Buffer.from(JSON.stringify({
+      {
         reportId,
         farmerId: farmer.farmerId,
         locale,
@@ -197,14 +201,13 @@ export async function POST(req: NextRequest) {
         sourceFileName: file.name,
         sourceContentType: file.type,
         soilData,
-      }, null, 2)),
-      'application/json'
+      }
     );
 
     // Mark previous reports as not current.
     await markPreviousReportsNotCurrent(farmer.farmerId, existing);
 
-    await putItem(Tables.SOIL_REPORTS, {
+    const soilItem = {
       farmer_id: farmer.farmerId,
       uploaded_at: uploadedAt,
       report_id: reportId,
@@ -227,6 +230,21 @@ export async function POST(req: NextRequest) {
       lab_name: soilData.labName,
       report_date: soilData.reportDate,
       is_current: true,
+    };
+
+    await putItem(Tables.SOIL_REPORTS, soilItem);
+    await tryMirror('soil report metadata', async () => {
+      await mirrorJsonToS3(jsonS3Key, {
+      reportId,
+      farmerId: farmer.farmerId,
+      locale,
+      uploadedAt,
+      sourceFileKey: s3Key,
+      sourceFileName: file.name,
+      sourceContentType: file.type,
+      soilData,
+      dbItem: soilItem,
+      });
     });
 
     return NextResponse.json({ success: true, soilData, reportId, s3Key, jsonS3Key });

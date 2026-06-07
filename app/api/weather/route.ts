@@ -12,14 +12,7 @@ export async function GET(req: NextRequest) {
   try {
     const profile = await getItem(Tables.FARMER_PROFILES, { farmer_id: farmer.farmerId });
     if (!profile?.land_coordinates?.length) {
-      // Default to Chennai coordinates if no land coordinates
-      const lat = 13.0827;
-      const lon = 80.2707;
-      const [current, forecast] = await Promise.all([
-        getCurrentWeather(lat, lon),
-        get15DayForecast(lat, lon),
-      ]);
-      return NextResponse.json({ current, forecast });
+      return NextResponse.json({ current: null, forecast: [], reason: 'no_land_coordinates' });
     }
 
     const centroid = extractCentroid(profile.land_coordinates as Array<{ lat: number; lng: number }>);

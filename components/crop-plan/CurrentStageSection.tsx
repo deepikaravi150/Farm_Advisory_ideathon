@@ -22,13 +22,6 @@ interface Props {
   locale: Locale;
 }
 
-const SEG_COLOR: Record<StageStatus, string> = {
-  done: 'bg-emerald-500',
-  active: 'bg-brand-500',
-  alert: 'bg-red-500',
-  pending: 'bg-gray-200',
-};
-
 export default function CurrentStageSection({ cropName, stages, currentId, insight, risk, riskLevel, locale }: Props) {
   const t = (en: string, hi: string, ta: string) => (locale === 'ta' ? ta : locale === 'hi' ? hi : en);
   const dateLocale = locale === 'ta' ? 'ta-IN' : locale === 'hi' ? 'hi-IN' : 'en-IN';
@@ -38,6 +31,11 @@ export default function CurrentStageSection({ cropName, stages, currentId, insig
   const currentIdx = Math.max(0, stages.findIndex((s) => s.id === currentId));
   const current = stages[currentIdx];
   const doneCount = stages.filter((s) => s.status === 'done').length;
+  const segmentColor = (stage: StageProgress, index: number) => {
+    if (stage.status === 'done' || index < currentIdx) return 'bg-emerald-500';
+    if (stage.id === currentId || stage.status === 'active') return 'bg-brand-500';
+    return 'bg-gray-200';
+  };
 
   const riskBadge =
     riskLevel === 'High' ? 'bg-red-50 text-red-700' :
@@ -57,11 +55,11 @@ export default function CurrentStageSection({ cropName, stages, currentId, insig
 
       {/* Segmented progress across all stages */}
       <div className="mt-3 flex gap-1">
-        {stages.map((s) => (
+        {stages.map((s, index) => (
           <div
             key={s.id}
             title={`${s.label} (${fmt(s.date)})`}
-            className={`h-2 flex-1 rounded-full ${SEG_COLOR[s.status]} ${s.id === currentId ? 'ring-2 ring-brand-300' : ''}`}
+            className={`h-2 flex-1 rounded-full ${segmentColor(s, index)} ${s.id === currentId ? 'ring-2 ring-brand-300' : ''}`}
           />
         ))}
       </div>

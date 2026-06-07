@@ -17,7 +17,7 @@ export default function LanguageSwitcher() {
   const current = useLocale();
 
   function switchLang(code: string) {
-    Cookies.set('locale', code, { expires: 365 });
+    Cookies.set('locale', code, { expires: 365, path: '/' });
     setOpen(false);
     router.refresh();
   }

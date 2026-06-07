@@ -2,14 +2,16 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { Sprout, Phone, Lock, Loader2, AlertCircle, Eye, EyeOff } from 'lucide-react';
 import LanguageSwitcher from '@/components/layout/LanguageSwitcher';
+import { toTenDigitPhone } from '@/lib/phone';
 
 export default function LoginPage() {
   const router = useRouter();
   const t = useTranslations('login');
   const tc = useTranslations('common');
+  const locale = useLocale();
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -24,7 +26,7 @@ export default function LoginPage() {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone, password }),
+        body: JSON.stringify({ phone, password, locale }),
       });
       const data = await res.json();
       if (!res.ok) { setError(data.error ?? t('failed')); return; }
@@ -57,8 +59,9 @@ export default function LoginPage() {
             <label className="block text-sm font-medium text-gray-700 mb-1">{t('phone')}</label>
             <div className="relative">
               <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input value={phone} onChange={e => setPhone(e.target.value)} placeholder={t('phonePlaceholder')}
-                className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-400 text-sm" required />
+              <span className="absolute left-10 top-1/2 -translate-y-1/2 text-sm font-medium text-gray-500">+91</span>
+              <input value={phone} onChange={e => setPhone(toTenDigitPhone(e.target.value))} placeholder={t('phonePlaceholder')} inputMode="numeric"
+                className="w-full pl-20 pr-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-400 text-sm" required />
             </div>
           </div>
           <div>
@@ -85,6 +88,7 @@ export default function LoginPage() {
           {t('newFarmer')}{' '}
           <Link href="/register" className="text-brand-600 hover:text-brand-800 font-medium">{t('registerHere')}</Link>
         </p>
+        <p className="text-xs text-center text-gray-400 mt-4">{t('copyright')}</p>
       </div>
     </div>
   );

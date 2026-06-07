@@ -1,6 +1,180 @@
 FarmAdvisor - Full App Screen and Widget Input/Process/Output Flow
 Generated on: 2026-06-05
+Last updated: 2026-06-07
 Purpose: Human-readable reference explaining every main page and widget from login through the final app screens. Each section says what input the widget takes, where the input comes from, which file/API/data document it refers to, how it processes the data, and what output the farmer sees.
+
+================================================================================
+LATEST IMPLEMENTATION CHANGES - 2026-06-06
+================================================================================
+
+Latest updates added on 2026-06-07:
+
+Dashboard UI and layout:
+- The dashboard now uses a wider max-width layout with cleaner spacing.
+- Main farm widgets stay in the left/main content area.
+- Chatbot and recent chats stay in the right dashboard rail on large screens.
+- Daily SMS Draft was moved out of the chat rail and placed horizontally below Suitable Crops.
+- Daily SMS Draft uses a responsive layout:
+  - mobile: stacked draft + controls
+  - desktop: draft text on the left, language/phone/send controls on the right
+- Dashboard crop-plan widgets now use all active crop plans, not only the first active plan.
+- If any active plan is made inactive or deleted, its dashboard details and SMS content are removed.
+
+Daily SMS:
+- app/api/daily-sms/route.ts supports:
+  - GET /api/daily-sms?locale=<en|hi|ta> to preview the draft in the current page language.
+  - POST /api/daily-sms with { locale } to manually send the current page-language SMS.
+- lib/daily-sms.ts builds one SMS using all active crop plans, weather forecast, soil report, current stages, fertilizer/nutrient needs, and pest/disease reminder.
+- Automatic daily SMS still uses the farmer's saved preferred_language from registration/profile.
+- Manual dashboard preview/send follows the current page language selected in the app.
+- app/api/cron/daily-sms/route.ts sends automatic SMS to farmers with verified phone numbers and active crop plans.
+- vercel.json schedules /api/cron/daily-sms at 30 2 * * *, which is 8:00 AM IST.
+
+Language behavior:
+- Daily SMS Draft title, loading text, metadata, send status, send button, and generated SMS body follow the selected page language.
+- Dashboard Active Crop Plans card translates crop names, stage names, task details, and alert text to the page language, with a local Tamil/Hindi fallback if API translation is unavailable.
+- Market price crop names, known market names, known village/market places, and weather labels are localized where mappings or translation are available.
+- Dynamic dashboard content should refetch/retranslate when the selected app language changes.
+
+Farmer ID:
+- Farmer ID must be TN followed by exactly 11 digits, for example TN12345678901.
+- Register form uppercases and cleans the Farmer ID while typing.
+- Register API enforces the same TN + 11 digit format before saving.
+
+Farmer data S3 mirroring:
+- Farmer registration and profile updates are mirrored to S3 as JSON.
+- Crop plan create/save/activate/deactivate actions mirror the plan JSON to S3.
+- Crop plan delete also deletes the mirrored S3 plan JSON.
+- Soil report upload stores the original report file in S3 and stores extracted JSON beside it.
+- S3 farmer folder structure:
+  - <farmerId>/profile/profile.json
+  - <farmerId>/crop-plans/<planId>/plan.json
+  - <farmerId>/soil-reports/<reportId>/original.<ext>
+  - <farmerId>/soil-reports/<reportId>/extraction.json
+
+How saved data is updated:
+- Farmer registration:
+  - Input: Farmer ID, name, phone, OTP, address, land boundary, land area, land type, preferred language, password.
+  - Update: app/api/auth/register/route.ts creates the farmer profile in DynamoDB farmer_profiles.
+  - Mirror: safe profile JSON is written to <farmerId>/profile/profile.json in S3.
+  - Output: login/dashboard/profile use the saved profile and language.
+- Profile edit:
+  - Input: edited profile fields.
+  - Update: app/api/farmer/profile/route.ts updates DynamoDB farmer_profiles.
+  - Mirror: <farmerId>/profile/profile.json is overwritten with the latest profile JSON.
+  - Output: dashboard weather, land map, crop plan, daily SMS, and chat context use the new profile data.
+- Farmer memory:
+  - Input: durable facts extracted from chat, plus notes manually added on Profile.
+  - Update: app/api/farmer/memory/route.ts updates the memory array inside farmer_profiles.
+  - Output: Profile shows facts in the current page language; chat and crop-plan prompts receive the stored facts as farmer context.
+- Soil report upload:
+  - Input: PDF/JPEG/PNG lab soil report uploaded only on Profile.
+  - Update: app/api/soil/upload/route.ts checks duplicate hash, uploads the original file to S3, extracts values with OpenAI, stores normalized data in DynamoDB soil_reports, and uploads extraction JSON to S3.
+  - Mirror:
+    - <farmerId>/soil-reports/<reportId>/original.<ext>
+    - <farmerId>/soil-reports/<reportId>/extraction.json
+  - Output: Profile, Dashboard Soil Health, Crop Plan land state, Suitable Crops, chatbot, crop-plan generation, and Daily SMS use the latest/current soil report.
+- Crop plan create/save:
+  - Input: crop name, assessment answers, farmer profile, weather, soil report, memory, and optional selected land/crop details.
+  - Update: app/api/crop-plan/route.ts creates or updates the crop plan in DynamoDB crop_plans.
+  - Mirror: <farmerId>/crop-plans/<planId>/plan.json is written to S3.
+  - Output: Crop Plan page shows the plan; active plans flow to dashboard widgets and daily SMS.
+- Crop plan activate/deactivate/delete:
+  - Input: user action from the Crop Plan page.
+  - Update: status changes are saved in DynamoDB crop_plans.
+  - Mirror: activation/deactivation overwrites the S3 plan JSON; delete removes the S3 plan JSON.
+  - Output: inactive/deleted plans disappear from dashboard Active Crop Plans, Today Action Banner, and Daily SMS.
+- Weather:
+  - Input: saved land polygon in farmer_profiles.land_coordinates.
+  - Update: no app write is needed; dashboard/API fetches live Open-Meteo data using the farm polygon centroid.
+  - Output: weather widget, crop-plan alerts, chat context, and SMS use the current farm weather.
+- Mandi prices:
+  - Input: selected/search crop name and state.
+  - Update: no app write is needed; app/api/market-prices/route.ts fetches data.gov.in Agmarknet API on request.
+  - Output: dashboard market widget shows translated crop/market/arrival text where mappings or translation are available.
+- Daily SMS:
+  - Input: farmer profile, verified phone, all active crop plans, latest soil report, live weather, and preferred/current locale.
+  - Update: preview does not write data. Manual send posts to AWS SNS. Automatic cron sends at 8:00 AM IST.
+  - Output: dashboard preview and actual SMS include all active plans and follow the selected/saved language.
+
+Example: uploaded soil report + Chilli and Black gram active plans:
+- Farmer:
+  - farmer_id: TN12345678901
+  - land: 2 acres near Kalasapakkam
+  - preferred language: Tamil
+  - verified phone: +91XXXXXXXXXX
+- Uploaded soil report:
+  - pH: 6.6
+  - EC: 0.11
+  - Nitrogen: Low
+  - Phosphorus: Low
+  - Potassium: Medium
+  - Organic carbon: Low
+- Active plan 1: Chilli
+  - Current stage: Land Preparation
+  - Dashboard Active Crop Plans shows Chilli stage, date range, land-preparation tasks, and any weather alert.
+  - Soil Health uses pH/N/P/K from the uploaded report and explains that N and P need correction.
+  - Daily SMS includes Chilli action points such as clearing weeds, deep ploughing, drainage, and avoiding open-field work during storm/heavy-rain warnings.
+- Active plan 2: Black gram
+  - Current stage: Land Preparation or the active milestone for that crop.
+  - Dashboard Active Crop Plans also shows Black gram, not only Chilli.
+  - Suitable Crops may recommend pulses like Black gram/Green gram because pulses can improve nitrogen and pH 6.6 fits many pulse crops.
+  - Daily SMS includes Black gram points together with Chilli points in the same message.
+- If Black gram is deactivated:
+  - DynamoDB crop_plans status changes to inactive.
+  - S3 <farmerId>/crop-plans/<planId>/plan.json is updated.
+  - Dashboard and Daily SMS remove Black gram and keep only the remaining active plans.
+- Language behavior:
+  - Stored memory may remain English for LLM consistency.
+  - Farmer-facing widgets translate rendered facts, crop names, stage names, soil text, alerts, SMS body, and buttons to the current app language.
+
+Phone number handling:
+- All farmer mobile number inputs visually show the India country code prefix +91.
+- UI still stores and sends the local 10 digit number internally.
+- lib/phone.ts normalizes +91XXXXXXXXXX, 91XXXXXXXXXX, 0XXXXXXXXXX, and XXXXXXXXXX into a 10 digit phone.
+- SNS helpers in lib/aws/sns.ts convert phone numbers to E.164 format +91XXXXXXXXXX before SMS/OTP calls.
+
+OTP / SNS verification:
+- Register details page includes Send OTP / Resend OTP flow.
+- Resend is disabled for 5 minutes after sending.
+- Register API verifies the OTP before creating the farmer account.
+- Standalone verify OTP page also uses +91-prefixed phone entry.
+
+Location and weather:
+- Weather uses the farmer's saved land boundary coordinates from farmer_profiles.land_coordinates.
+- The centroid of the selected land polygon is used for current weather, forecast, crop plan weather annotation, crop-plan chat, and chatbot weather context.
+- The hidden Chennai fallback was removed. If land coordinates are missing, weather is unavailable instead of using another location.
+- Weather is live/near-live from Open-Meteo with periodic Next.js revalidation.
+- Reverse geocoding labels the weather location as "Farm near <place>" using Nominatim, based on the farm coordinates.
+
+Dashboard layout:
+- Recent Chats was moved below the chatbot in the right dashboard column.
+- Chatbot remains in-place; recent chat clicks load that conversation into the existing dashboard chatbot via /dashboard?chat=<id>.
+- /chat/[id] redirects to the dashboard chat instead of showing a separate chat page.
+- Dashboard land map shows the farmer-selected land polygon and supports map zoom controls and double-click zoom.
+
+Soil report behavior:
+- Soil report upload is only on the Profile page.
+- Profile fetches /api/soil with no-store caching and shows saved soil report details when present.
+- Dashboard Soil Health and Crop Plan land state widgets read the latest soil report and translate soil report summary/findings/recommendations based on the current app language.
+- If a duplicate soil report is uploaded, the profile page shows that the details are already present.
+
+Crop planning:
+- In the New Plan flow, when a farmer chooses that they have a crop in mind, the crop field is now a plain input box, not a dropdown.
+- The app uses exactly the crop name the farmer types.
+- Enter key submits/advances where appropriate in login/register/search/crop plan inputs.
+- Current ongoing stage progress shows only stage progress: completed green, current brand green, future gray. Risk is shown only in the Risk badge.
+
+District/soil crop suitability:
+- lib/crop-suitability.ts ranks crop options using farmer address/district and soil report values.
+- /api/crop-options returns suitable crop names and reasons using address + pH + N/P/K status.
+- Dashboard includes SuitableCropsWidget to show other crops the farmer can consider for this farm.
+
+Market prices:
+- Mandi prices are fetched from data.gov.in Agmarknet API in app/api/market-prices/route.ts.
+- The app does not use S3 for mandi prices.
+- DATA_GOV_IN_API_KEY is optional; if empty, the route falls back to a shared sample key.
+- Commodity aliases are handled, e.g. Chilli -> Green Chilli and Rice -> Paddy(Dhan).
 
 ================================================================================
 0. GLOBAL RULES USED BY THE WHOLE APP
@@ -59,7 +233,7 @@ Main storage source:
   - government_schemes
 - S3 media bucket:
   - S3_BUCKET_MEDIA
-  - used for land images, soil PDFs/images, soil extraction JSON, and crop images where uploaded.
+  - used for land images, soil PDFs/images, soil extraction JSON, profile JSON mirror, crop-plan JSON mirror, and crop images where uploaded.
 
 ================================================================================
 1. LOGIN PAGE
@@ -90,11 +264,12 @@ Output:
 
 1.2 Phone Input
 Input:
-- Farmer enters 10 digit phone number.
+- Farmer enters an India mobile number with the visible +91 prefix.
 Source:
 - User typing in login form.
 Processing:
-- Stored in React state as phone.
+- UI accepts the local 10 digit number while showing +91.
+- lib/phone.ts normalizes +91XXXXXXXXXX, 91XXXXXXXXXX, 0XXXXXXXXXX, and XXXXXXXXXX into a 10 digit local phone value.
 - Sent to POST /api/auth/login.
 Output:
 - Phone becomes the lookup key for farmer account.
@@ -150,7 +325,9 @@ Main widgets:
 - Step indicator
 - FarmerDetailsForm
 - LandMapSelector
-- Password and confirm password fields
+- Phone OTP input and Send OTP / Resend OTP button
+- SMS language select
+- Password and confirm password fields with real-app strength rules
 - Create account button
 - Login link
 
@@ -171,20 +348,25 @@ Input:
 - farmerId
 - name
 - phone
+- phoneOtp
 - address
 - typography / land type
 - landAreaAcres
+- preferredLanguage
 Source:
 - Farmer form fields.
 - Labels and validation messages from next-intl register namespace.
 Processing:
 - react-hook-form collects fields.
 - Zod validates:
-  - farmerId required
+  - farmerId must match TN followed by exactly 11 digits, e.g. TN12345678901
   - name minimum length
-  - phone must be 10 digits
+  - phone must be a valid India mobile number with +91 display and 10 digit normalized storage
+  - OTP must be verified before account creation
   - address minimum length
   - landAreaAcres positive number
+- Send OTP calls SNS-backed OTP API. After one send, the button changes to Resend OTP and stays disabled for 5 minutes.
+- preferredLanguage is saved as preferred_language on the farmer profile and is used by the automatic 8:00 AM SMS job.
 - On success, sends data back to register page through onNext.
 Output:
 - Valid form data is saved in RegisterPage state.
@@ -221,8 +403,14 @@ Source:
 - Farmer typing.
 Processing:
 - Client checks password match.
-- Client checks password length minimum 8.
+- Client checks real-app password strength:
+  - minimum 8 characters
+  - uppercase letter
+  - lowercase letter
+  - number
+  - special character
 - Show/hide toggles input type.
+- Enter submits/advances when fields are valid.
 Output:
 - Valid password is included in registration payload.
 
@@ -231,11 +419,13 @@ Input:
 - formData from FarmerDetailsForm
 - coords from LandMapSelector
 - password
+- verified phone OTP
 Source:
 - Register page state.
 Processing:
 - Calls POST /api/auth/register.
 - API validates body.
+- API verifies OTP for the normalized phone number.
 - API checks duplicate farmer_id and phone.
 - Password is hashed.
 - Profile is stored in DynamoDB farmer_profiles.
@@ -318,7 +508,7 @@ Server-side inputs loaded before rendering:
 - current weather and 16-day forecast from lib/weather.ts
 - latest soil report from DynamoDB soil_reports
 - latest 10 crop plans from DynamoDB crop_plans
-- active plan preferred, otherwise most recent plan
+- all plans with status active are selected for dashboard crop widgets
 - selected locale from next-intl
 
 Main widgets:
@@ -330,6 +520,8 @@ Main widgets:
 - SoilHealthWidget
 - MarketPricesWidget
 - LandMapWidget
+- SuitableCropsWidget
+- DailySmsWidget
 - ChatSummaryWidget
 - ChatPanel
 
@@ -366,22 +558,24 @@ File:
 Input:
 - current weather
 - forecast array
-- selected active/latest plan
+- all active crop plans
 Source:
 - app/dashboard/page.tsx passes data from lib/weather.ts and crop_plans.
 - lib/farm-advice.ts provides weatherVerdict and nextStepFromPlan.
 Processing:
 - If no weather/forecast, hides itself.
 - Computes weather verdict from forecast.
-- Computes next active/upcoming crop step from plan using current date.
+- Computes next active/upcoming crop step from all active plans using current date.
 - Weather urgent condition wins over crop task.
-- Otherwise active crop task or upcoming task becomes headline.
+- Otherwise the most relevant active/upcoming crop task becomes headline.
 Output:
 - A single "today's plan" banner:
   - urgent weather warning, or
   - crop stage action, or
   - general weather suggestion.
 - Link to /crop-plan when plan exists.
+- Shows chips for every active crop plan.
+- Crop names and weather text are localized based on the selected app language.
 
 4.4 WeatherWidget
 File:
@@ -414,16 +608,18 @@ Output:
 File:
 - components/dashboard/CropPlanNextStepWidget.tsx
 Input:
-- active/latest crop plan or null.
+- all active crop plans.
 Source:
 - crop_plans DynamoDB table via dashboard page.
 - lib/farm-advice.ts nextStepFromPlan.
 Processing:
-- If no plan, shows create plan CTA.
-- If plan exists, computes active or upcoming step using today's date.
-- Displays crop name, step label, date range, task text, and alert advice.
+- If no active plan exists, shows create plan CTA.
+- For each active plan, computes active or upcoming step using today's date.
+- Displays crop name, step label, date range, task text, and alert advice for every active plan.
+- Translates crop names, stage names, task text, and alert text through /api/translate.
+- Uses local Tamil/Hindi fallback replacements when translation API is unavailable or incomplete.
 Output:
-- "Your Crop Plan" card showing next/current farm action.
+- "Active Crop Plans" card showing next/current farm action for all active plans.
 - Link to /crop-plan.
 
 4.6 SoilHealthWidget
@@ -447,7 +643,7 @@ Output:
 File:
 - components/dashboard/MarketPricesWidget.tsx
 Input:
-- defaultCommodity from active/latest crop plan if crop name is plain English.
+- defaultCommodity from the first active crop plan if crop name is plain English.
 - User-entered commodity search.
 - State default Tamil Nadu.
 Source:
@@ -458,6 +654,7 @@ Processing:
 - Loads price data for commodity/state.
 - User can search another English crop name.
 - Quick picks: Tomato, Onion, Rice, Brinjal, Banana.
+- Visible crop names, known market names, known village/district names, and variety names are localized where mappings or dynamic translation are available.
 - Shows average modal price, trend, and markets.
 Output:
 - Market price card with latest modal prices per quintal.
@@ -477,9 +674,9 @@ Source:
 Processing:
 - If no coordinates, shows no-coordinates state.
 - Calculates center as average of coordinate points.
-- Displays static Leaflet satellite map.
+- Displays Leaflet satellite map focused on the farmer-selected land polygon.
 - Draws polygon from land coordinates.
-- Disables map dragging/zooming interactions.
+- Supports zoom controls and double-click zoom while keeping the selected polygon visible.
 Output:
 - "Your Land" map card with polygon and acreage.
 
@@ -495,10 +692,40 @@ Processing:
 - Fetches chats client-side.
 - Uses first 3 chat records.
 - Displays summary, up to 3 tags, and formatted timestamp.
+- Placed below the dashboard chatbot in the right column.
+- Clicking a recent chat opens /dashboard?chat=<id> and loads that conversation into the existing chatbot.
 Output:
-- Recent chats widget.
+- Recent chats widget below the chatbot, with continuation in the same ChatPanel.
 
-4.10 ChatPanel
+4.10 DailySmsWidget
+File:
+- components/dashboard/DailySmsWidget.tsx
+Input:
+- current page locale
+- authenticated farmer profile
+- all active crop plans
+- latest soil report
+- weather forecast from farmer land centroid
+Source:
+- GET /api/daily-sms?locale=<current-locale>
+- POST /api/daily-sms with { locale } for manual sending
+- lib/daily-sms.ts
+- AWS SNS helper lib/aws/sns.ts
+Processing:
+- Client refetches the draft whenever the selected app language changes.
+- API drafts the SMS in the requested page language for dashboard preview.
+- Draft uses all active crop plans, current stages, weather, soil pH/N/P/K, fertilizer/nutrient reminder, and pest/disease reminder.
+- Manual Send sends the same current page-language draft through SNS to the farmer phone number.
+- The scheduled automatic route uses the farmer's saved preferred_language.
+Output:
+- Horizontal Daily SMS Draft card below Suitable Crops:
+  - SMS draft text
+  - language name
+  - +91 phone target
+  - Send button
+  - send status/error
+
+4.11 ChatPanel
 File:
 - components/chatbot/ChatPanel.tsx
 Input:
@@ -527,7 +754,7 @@ Output:
 - Chat is later visible in recent chats/history.
 
 ================================================================================
-5. CHAT DETAIL PAGE
+5. LEGACY CHAT DETAIL ROUTE
 ================================================================================
 
 Page file:
@@ -538,19 +765,12 @@ Input:
 - auth_token cookie.
 Source:
 - URL /chat/<id>.
-- DynamoDB chat_history queried by farmer_id.
 Processing:
-- Loads latest 25 chats for farmer.
-- Finds chat where chat_id equals route param.
-- Redirects to /dashboard if not found.
-- Formats timestamp with lib/utils.ts formatDate.
+- Redirects to /dashboard?chat=<id>.
+- The dashboard ChatPanel loads that existing conversation in place.
 Output:
-- Full chat conversation:
-  - chat summary as title
-  - date
-  - context tags
-  - user and assistant messages
-  - back to dashboard link
+- No separate chat overlay/detail UI.
+- Farmer continues the selected conversation in the dashboard chatbot.
 
 ================================================================================
 6. PROFILE PAGE
@@ -725,6 +945,9 @@ Source:
 Processing:
 - Dynamic questions:
   - previous crop questions show only if grownBefore is Yes.
+- If the farmer chooses "I have crop in mind", cropName is entered in a plain text input box.
+- The crop dropdown/datalist was removed; the typed crop name is used exactly as entered.
+- Enter advances/submits where the current step has enough information.
 - Stable English option values are sent to LLM.
 - Display labels are localized.
 - Final submit calls crop-plan page onAssessmentSubmit.
@@ -832,7 +1055,8 @@ Source:
 - Plan milestones and weather warnings.
 Processing:
 - Shows progress through milestones.
-- Highlights current stage.
+- Highlights current stage with progress-only colors: completed/current stages use green and future stages use gray.
+- Risk is not drawn into the progress line; it appears only in the Risk badge.
 - Displays localized risk and advice.
 Output:
 - At-a-glance current stage card for active crop.
@@ -1089,7 +1313,7 @@ Source:
 - Nominatim reverse geocode.
 Processing:
 - Gets farmer land centroid using lib/utils.ts extractCentroid.
-- Falls back to Chennai if no coordinates.
+- If no coordinates exist, returns weather unavailable instead of using a fallback city.
 - Fetches current weather and 16-day forecast.
 Output:
 - Weather data used by:
@@ -1157,11 +1381,14 @@ Output:
 
 API file:
 - app/api/notifications/sms/route.ts
+- app/api/daily-sms/route.ts
+- app/api/cron/daily-sms/route.ts
 
 Input:
 - type: weather_alert, milestone_reminder, or custom
 - message max 160 chars
 - auth_token cookie
+- all active crop plans, weather, soil report, and selected locale for daily SMS
 Source:
 - Farmer phone from DynamoDB farmer_profiles.
 - AWS SNS helper lib/aws/sns.ts.
@@ -1176,6 +1403,19 @@ Output:
 - Farmer receives SMS.
 - API returns success true.
 
+Daily SMS:
+- Dashboard preview:
+  - GET /api/daily-sms?locale=<current-locale>
+  - Output follows the current page language.
+- Dashboard manual send:
+  - POST /api/daily-sms with { locale }
+  - Sends the current page-language draft to the farmer's phone.
+- Automatic 8:00 AM IST send:
+  - /api/cron/daily-sms
+  - Scheduled through vercel.json cron at 30 2 * * *.
+  - Uses each farmer's saved preferred_language.
+  - Requires cron header or CRON_SECRET validation.
+
 ================================================================================
 14. FINAL HUMAN SUMMARY: WHAT EACH PAGE OUTPUTS
 ================================================================================
@@ -1185,6 +1425,7 @@ Login page output:
 
 Register page output:
 - New farmer profile in DynamoDB with land boundary and account password hash.
+- Safe farmer profile JSON mirrored to S3 under <farmerId>/profile/profile.json.
 
 Landing page output:
 - Public app explanation, language switching, and scheme cards.
@@ -1197,12 +1438,15 @@ Dashboard output:
   - soil health
   - market prices
   - land map
+  - suitable crop suggestions
+  - daily SMS draft/send
   - recent chats
   - full advisor chat
 
 Profile output:
 - Farmer profile details and editable fields.
 - Uploaded/extracted soil report.
+- Original soil PDF/image and extraction JSON stored in the farmer's S3 soil-reports folder.
 - Durable farmer memory facts.
 
 Crop plan output:
@@ -1212,6 +1456,7 @@ Crop plan output:
 - Full milestone timeline.
 - Soil/weather/profile-aware crop planning.
 - Plan assistant capable of modifying plan.
+- Crop plan JSON mirrored to the farmer's S3 crop-plans folder and deleted there when the plan is deleted.
 
 Chat detail output:
 - Complete saved conversation with context tags.
@@ -1219,6 +1464,7 @@ Chat detail output:
 Background data output:
 - DynamoDB stores farmer, soil, crop plan, chat, scheme data.
 - S3 stores uploaded files and soil extraction JSON.
+- S3 also mirrors profile JSON and crop-plan JSON by farmer_id folders.
 - Qdrant stores/retrieves knowledge base chunks.
 - OpenAI generates advice, extraction, translation, memory, plans, and speech.
 

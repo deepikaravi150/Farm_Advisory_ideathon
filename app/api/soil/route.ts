@@ -21,7 +21,11 @@ export async function GET(req: NextRequest) {
       Limit: 10,
     });
 
-    if (!reports.length) return NextResponse.json({ soil: null });
+    if (!reports.length) {
+      return NextResponse.json({ soil: null }, {
+        headers: { 'Cache-Control': 'no-store' },
+      });
+    }
     const item = reports.find((r) => r.is_current) ?? reports[0];
 
     return NextResponse.json({
@@ -38,7 +42,10 @@ export async function GET(req: NextRequest) {
         recommendations: item.recommendations ?? null,
         labName: item.lab_name ?? null,
         reportDate: item.report_date ?? null,
+        locale: item.locale ?? null,
       },
+    }, {
+      headers: { 'Cache-Control': 'no-store' },
     });
   } catch (err) {
     console.error('Soil fetch error:', err);

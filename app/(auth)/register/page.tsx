@@ -6,6 +6,7 @@ import dynamic from 'next/dynamic';
 import { useTranslations } from 'next-intl';
 import { CheckCircle2, Eye, EyeOff, Sprout } from 'lucide-react';
 import FarmerDetailsForm, { type FarmerFormData } from '@/components/register/FarmerDetailsForm';
+import LanguageSwitcher from '@/components/layout/LanguageSwitcher';
 
 const LandMapSelector = dynamic(() => import('@/components/register/LandMapSelector'), {
   ssr: false,
@@ -67,6 +68,9 @@ export default function RegisterPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-brand-50 to-earth-50 flex items-center justify-center p-4">
+      <div className="absolute right-4 top-4">
+        <LanguageSwitcher />
+      </div>
       <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-2xl">
         <div className="flex items-center gap-2 justify-center mb-6">
           <Sprout className="w-7 h-7 text-brand-600" />
@@ -100,7 +104,13 @@ export default function RegisterPage() {
         )}
 
         {step === 'password' && (
-          <div className="space-y-4 max-w-sm mx-auto">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!loading) register();
+            }}
+            className="space-y-4 max-w-sm mx-auto"
+          >
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">{t('createPassword')}</label>
               <div className="relative">
@@ -135,13 +145,13 @@ export default function RegisterPage() {
             </div>
             {error && <p className="text-red-500 text-sm">{error}</p>}
             <div className="flex gap-3">
-              <button onClick={() => setStep('map')} className="flex-1 border border-gray-300 text-gray-600 py-3 rounded-xl hover:bg-gray-50">{tc('back')}</button>
-              <button onClick={register} disabled={loading}
+              <button type="button" onClick={() => setStep('map')} className="flex-1 border border-gray-300 text-gray-600 py-3 rounded-xl hover:bg-gray-50">{tc('back')}</button>
+              <button type="submit" disabled={loading}
                 className="flex-1 bg-brand-600 text-white py-3 rounded-xl hover:bg-brand-700 disabled:opacity-40 font-semibold">
                 {loading ? t('creating') : t('createAccount')}
               </button>
             </div>
-          </div>
+          </form>
         )}
 
         <p className="text-sm text-center text-gray-500 mt-6">

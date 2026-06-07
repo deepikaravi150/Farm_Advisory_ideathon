@@ -18,6 +18,37 @@ const CATEGORY_ICON: Record<MemoryCategory, React.ComponentType<{ className?: st
   other: StickyNote,
 };
 
+const PLACE_NAMES: Record<string, { hi: string; ta: string }> = {
+  kalasapakkam: { hi: '\u0915\u0932\u0938\u092a\u0915\u094d\u0915\u092e', ta: '\u0b95\u0bb2\u0b9a\u0baa\u0bcd\u0baa\u0bbe\u0b95\u0bcd\u0b95\u0bae\u0bcd' },
+};
+
+function localizedPlaceName(place: string, locale: string) {
+  const clean = place.trim().replace(/\.$/, '');
+  const match = PLACE_NAMES[clean.toLowerCase()];
+  if (!match) return clean;
+  return locale === 'ta' ? match.ta : locale === 'hi' ? match.hi : clean;
+}
+
+function localizeFactText(text: string, locale: string) {
+  if (locale === 'en') return text;
+
+  const farmNear = text.match(/^The farm is located in or near (.+)\.$/i);
+  if (farmNear) {
+    const place = localizedPlaceName(farmNear[1], locale);
+    if (locale === 'ta') return `\u0baa\u0ba3\u0bcd\u0ba3\u0bc8 ${place} \u0b85\u0bb0\u0bc1\u0b95\u0bbf\u0bb2\u0bcd \u0b85\u0bae\u0bc8\u0ba8\u0bcd\u0ba4\u0bc1\u0bb3\u0bcd\u0bb3\u0ba4\u0bc1.`;
+    return `\u0916\u0947\u0924 ${place} \u0915\u0947 \u0906\u0938-\u092a\u093e\u0938 \u0938\u094d\u0925\u093f\u0924 \u0939\u0948.`;
+  }
+
+  const landArea = text.match(/^The farmer has about (.+?) acres? of land\.$/i);
+  if (landArea) {
+    const acres = landArea[1].trim();
+    if (locale === 'ta') return `\u0bb5\u0bbf\u0bb5\u0b9a\u0bbe\u0baf\u0bbf\u0baf\u0bbf\u0b9f\u0bae\u0bcd \u0b9a\u0bc1\u0bae\u0bbe\u0bb0\u0bcd ${acres} \u0b8f\u0b95\u0bcd\u0b95\u0bb0\u0bcd \u0ba8\u0bbf\u0bb2\u0bae\u0bcd \u0b89\u0bb3\u0bcd\u0bb3\u0ba4\u0bc1.`;
+    return `\u0915\u093f\u0938\u093e\u0928 \u0915\u0947 \u092a\u093e\u0938 \u0932\u0917\u092d\u0917 ${acres} \u090f\u0915\u0921\u093c \u091c\u092e\u0940\u0928 \u0939\u0948.`;
+  }
+
+  return text;
+}
+
 export default function FarmerMemorySection({ initialFacts }: Props) {
   const locale = useLocale();
   const t = (en: string, hi: string, ta: string) => (locale === 'ta' ? ta : locale === 'hi' ? hi : en);
@@ -109,7 +140,7 @@ export default function FarmerMemorySection({ initialFacts }: Props) {
                 <ul className="space-y-1.5">
                   {items.map((f) => (
                     <li key={f.id} className="group flex items-start justify-between gap-2 rounded-lg bg-gray-50 px-3 py-2">
-                      <span className="text-sm text-gray-700">{f.text}</span>
+                      <span className="text-sm text-gray-700">{localizeFactText(f.text, locale)}</span>
                       <button
                         type="button"
                         onClick={() => removeFact(f.id)}

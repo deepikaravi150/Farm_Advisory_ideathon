@@ -8,12 +8,14 @@ import { get15DayForecast, type ForecastDay } from '@/lib/weather';
 import { annotateMilestonesWithWeather, forecastSummaryForPrompt } from '@/lib/crop-plan-weather';
 import { formatMemoryForPrompt, type Fact } from '@/lib/memory';
 import type { Milestone } from '@/lib/types/crop-plan';
+import { mirrorCropPlanToS3, deleteCropPlanFromS3, tryMirror } from '@/lib/farmer-s3-store';
 
-/** Best-effort 16-day forecast for the farmer's land (centroid, else Chennai). */
+/** Best-effort 16-day forecast for the farmer's saved land centroid. */
 async function getFarmerForecast(profile: Record<string, unknown> | null): Promise<ForecastDay[]> {
   try {
     const coords = profile?.land_coordinates as Array<{ lat: number; lng: number }> | undefined;
-    const { lat, lng } = coords?.length ? extractCentroid(coords) : { lat: 13.0827, lng: 80.2707 };
+    if (!coords?.length) return [];
+    const { lat, lng } = extractCentroid(coords);
     return await get15DayForecast(lat, lng);
   } catch (e) {
     console.error('Crop-plan forecast fetch failed:', e);
@@ -53,6 +55,7 @@ export async function DELETE(req: NextRequest) {
       farmer_id: farmer.farmerId,
       plan_id: planId,
     });
+    await tryMirror('crop plan delete', () => deleteCropPlanFromS3(farmer.farmerId, planId));
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error('Crop plan delete error:', err);
@@ -249,6 +252,7 @@ async function persistPlan(
     updated_at: now,
   };
   await putItem(Tables.CROP_PLANS, item);
+  await tryMirror('crop plan save', () => mirrorCropPlanToS3(item));
   return item;
 }
 
@@ -314,6 +318,8 @@ export async function POST(req: NextRequest) {
           ':u': new Date().toISOString(),
         },
       });
+      const updated = await getItem(Tables.CROP_PLANS, { farmer_id: farmer.farmerId, plan_id: planId });
+      if (updated) await tryMirror('crop plan activate', () => mirrorCropPlanToS3(updated));
 
       return NextResponse.json({ success: true });
     }
@@ -330,6 +336,8 @@ export async function POST(req: NextRequest) {
           ':u': new Date().toISOString(),
         },
       });
+      const updated = await getItem(Tables.CROP_PLANS, { farmer_id: farmer.farmerId, plan_id: planId });
+      if (updated) await tryMirror('crop plan deactivate', () => mirrorCropPlanToS3(updated));
 
       return NextResponse.json({ success: true });
     }

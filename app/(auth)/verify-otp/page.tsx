@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { ShieldCheck } from 'lucide-react';
+import { toTenDigitPhone } from '@/lib/phone';
 
 export default function VerifyOtpPage() {
   const [phone, setPhone] = useState('');
@@ -68,13 +69,16 @@ export default function VerifyOtpPage() {
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Phone number</label>
-            <input
-              value={phone}
-              onChange={(event) => setPhone(event.target.value.replace(/\D/g, '').slice(0, 10))}
-              placeholder="10-digit phone number"
-              inputMode="numeric"
-              className="w-full border border-gray-300 rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-400 text-sm"
-            />
+            <div className="relative">
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-medium text-gray-500">+91</span>
+              <input
+                value={phone}
+                onChange={(event) => setPhone(toTenDigitPhone(event.target.value))}
+                placeholder="10-digit phone number"
+                inputMode="numeric"
+                className="w-full border border-gray-300 rounded-xl pl-14 pr-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-400 text-sm"
+              />
+            </div>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">OTP</label>

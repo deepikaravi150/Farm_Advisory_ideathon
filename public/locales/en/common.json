@@ -29,7 +29,9 @@
     "feature3Desc": "From sowing to selling — a visual plan covering every stage of farming.",
     "feature4Title": "Voice & Multilingual",
     "feature4Desc": "Ask questions by voice in Tamil, Hindi, or English — get answers instantly.",
-    "footer": "© 2025 FarmAdvisor · Built for Tamil Nadu Farmers · AI-powered by OpenAI"
+    "feature5Title": "Soil Report Analysis",
+    "feature5Desc": "Upload your soil report and get AI-extracted nutrients, findings, and fertilizer advice.",
+    "footer": "© 2026 FarmAdvisor · Built for Tamil Nadu Farmers · AI-powered by OpenAI"
   },
   "schemes": {
     "title": "Government Schemes for Farmers",
@@ -49,7 +51,8 @@
     "loggingIn": "Logging in...",
     "failed": "Login failed",
     "newFarmer": "New farmer?",
-    "registerHere": "Register here"
+    "registerHere": "Register here",
+    "copyright": "© 2026 FarmAdvisor. All rights reserved."
   },
   "register": {
     "title": "FarmAdvisor — Register",
@@ -57,7 +60,7 @@
     "stepLandMap": "Land Map",
     "stepPassword": "Password",
     "farmerId": "Government Farmer ID",
-    "farmerIdPlaceholder": "e.g. TN-1234567",
+    "farmerIdPlaceholder": "e.g. TN12345678901",
     "name": "Full Name",
     "namePlaceholder": "Your full name",
     "phone": "Phone Number",
