@@ -8,7 +8,17 @@ import {
 } from '@aws-sdk/client-sns';
 import { toIndiaPhone } from '@/lib/phone';
 
-const sns = new SNSClient({ region: process.env.SNS_REGION ?? 'ap-south-1' });
+const sns = new SNSClient({
+  region: process.env.SNS_REGION ?? 'ap-south-1',
+  ...(process.env.SNS_ACCESS_KEY_ID && process.env.SNS_SECRET_ACCESS_KEY
+    ? {
+        credentials: {
+          accessKeyId: process.env.SNS_ACCESS_KEY_ID,
+          secretAccessKey: process.env.SNS_SECRET_ACCESS_KEY,
+        },
+      }
+    : {}),
+});
 
 export function normalizePhoneNumber(phoneNumber: string): string {
   return toIndiaPhone(phoneNumber);

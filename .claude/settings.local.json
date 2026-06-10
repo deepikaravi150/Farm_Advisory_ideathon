@@ -25,7 +25,10 @@
       "Bash(git stash *)",
       "Bash(npx tsc *)",
       "Bash(node -e \"['en','hi','ta'].forEach\\(l=>{JSON.parse\\(require\\('fs'\\).readFileSync\\('public/locales/'+l+'/common.json','utf8'\\)\\);console.log\\(l,'OK'\\)}\\)\")",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(ssh *)",
+      "Bash(scp -o StrictHostKeyChecking=no -i \"C:\\\\Users\\\\SyedMohammedEesa\\\\OneDrive - GANIT BUSINESS SOLUTIONS PRIVATE LIMITED\\\\Documents\\\\Projects\\\\ideathon\\\\Farm-Key.pem\" \"C:\\\\Users\\\\SyedMohammedEesa\\\\OneDrive - GANIT BUSINESS SOLUTIONS PRIVATE LIMITED\\\\Documents\\\\Projects\\\\ideathon\\\\farm-advisor\\\\.env\" ubuntu@13.201.128.174:~/Farm_Advisory_ideathon/.env)",
+      "Bash(curl *)"
     ]
   }
 }

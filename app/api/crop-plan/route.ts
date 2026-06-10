@@ -9,6 +9,8 @@ import { annotateMilestonesWithWeather, forecastSummaryForPrompt } from '@/lib/c
 import { formatMemoryForPrompt, type Fact } from '@/lib/memory';
 import type { Milestone } from '@/lib/types/crop-plan';
 import { mirrorCropPlanToS3, deleteCropPlanFromS3, tryMirror } from '@/lib/farmer-s3-store';
+import { getSuitableCrops, type SoilSnapshot } from '@/lib/crop-suitability';
+import { getCropInfo } from '@/lib/crop-info';
 
 /** Best-effort 16-day forecast for the farmer's saved land centroid. */
 async function getFarmerForecast(profile: Record<string, unknown> | null): Promise<ForecastDay[]> {
@@ -64,13 +66,18 @@ export async function DELETE(req: NextRequest) {
 }
 
 const GeneratePlanSchema = z.object({
-  cropName: z.string().min(1),
+  // Optional for "not sure what to grow" — the AI picks the crop in that flow.
+  cropName: z.string().optional(),
   farmerState: z.enum(['planning_unsure', 'planning_specific', 'mid_grow']),
   currentCropInfo: z.string().optional(),
   assessment: z.record(z.string()).optional(),
   // Date the farmer plans to start (anchor for milestone scheduling).
   startDate: z.string().optional(),
   locale: z.enum(['en', 'hi', 'ta']).default('en'),
+}).superRefine((val, ctx) => {
+  if (val.farmerState !== 'planning_unsure' && !val.cropName?.trim()) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['cropName'], message: 'cropName is required' });
+  }
 });
 
 // Human-readable labels for the assessment answers collected by the modal.
@@ -83,6 +90,11 @@ const ASSESSMENT_LABELS: Record<string, string> = {
   pastIssues: 'Past problems faced',
   irrigation: 'Irrigation source',
   fertilizers: 'Fertilizers used',
+  // Mid-season (currently-growing) details.
+  currentStage: 'Current crop stage',
+  sowedWhen: 'Time since sowing/planting',
+  cropHealth: 'Current crop health',
+  symptoms: 'Visible problems/symptoms',
 };
 
 function formatAssessment(a?: Record<string, string>): string {
@@ -93,6 +105,136 @@ function formatAssessment(a?: Record<string, string>): string {
   return lines.length
     ? `\n\nFarmer's land & experience assessment (use this to customize the plan — choose crops/inputs/schedule that fit their experience level, irrigation, soil history and past issues):\n${lines.join('\n')}`
     : '';
+}
+
+// Lightweight crop suggestion card for the "not sure what to grow" flow. It has
+// no milestones — the full plan is generated only when the farmer picks one.
+interface CropSuggestionSummary {
+  cropName: string;
+  reason: string;
+  season: string;
+  estimatedRevenue: string;
+  totalBudgetEstimate: number;
+  startDate: string;
+  milestones: Milestone[];
+  harvestDate: string;
+  sellWindow: string;
+  storageNotes: string;
+}
+
+interface SuggestionContext {
+  profile: Record<string, unknown> | null;
+  soilData: Record<string, unknown> | undefined;
+  soilContext: string;
+  assessmentText: string;
+  forecastBlock: string;
+  outputLanguage: string;
+  locale: 'en' | 'hi' | 'ta';
+  startDate: string;
+}
+
+function toSuggestionSummary(c: unknown, startDate: string): CropSuggestionSummary | null {
+  if (!c || typeof c !== 'object') return null;
+  const crop = c as Record<string, unknown>;
+  const name = crop.cropName ?? crop.crop_name;
+  if (!name || !String(name).trim()) return null;
+  return {
+    cropName: String(name).trim(),
+    reason: String(crop.reason ?? ''),
+    season: String(crop.season ?? ''),
+    estimatedRevenue: String(crop.estimatedRevenue ?? crop.estimated_revenue ?? ''),
+    totalBudgetEstimate: Number(crop.totalBudgetEstimate ?? crop.budgetEstimate ?? crop.budget_estimate ?? 0) || 0,
+    startDate,
+    milestones: [],
+    harvestDate: '',
+    sellWindow: '',
+    storageNotes: '',
+  };
+}
+
+// Deterministic shortlist (district + soil scoring) used when the AI call fails.
+function fallbackSuggestions(ctx: SuggestionContext): CropSuggestionSummary[] {
+  const { profile, soilData, locale, startDate } = ctx;
+  const soil: SoilSnapshot | null = soilData ? {
+    ph: soilData.ph as SoilSnapshot['ph'],
+    nitrogen: soilData.nitrogen as SoilSnapshot['nitrogen'],
+    phosphorus: soilData.phosphorus as SoilSnapshot['phosphorus'],
+    potassium: soilData.potassium as SoilSnapshot['potassium'],
+    organicCarbon: soilData.organic_carbon as SoilSnapshot['organicCarbon'],
+  } : null;
+  const address = profile?.address as string | undefined;
+  return getSuitableCrops(address, soil).slice(0, 3).map((c) => {
+    const info = getCropInfo(c.cropName);
+    return {
+      cropName: c.cropName,
+      reason: c.reason,
+      season: info ? info.season[locale] : '',
+      estimatedRevenue: '',
+      totalBudgetEstimate: 0,
+      startDate,
+      milestones: [],
+      harvestDate: '',
+      sellWindow: '',
+      storageNotes: '',
+    };
+  });
+}
+
+// Ask the AI for the 3 best crops for this farmer's land/soil/season, falling
+// back to the deterministic suitability engine if the AI call fails.
+async function suggestCrops(ctx: SuggestionContext): Promise<CropSuggestionSummary[]> {
+  const { profile, soilContext, assessmentText, forecastBlock, outputLanguage, startDate } = ctx;
+
+  const prompt = `Recommend the best crops for a Tamil Nadu farmer who is unsure what to grow:
+         - Land: ${profile?.land_area_acres ?? 'unknown'} acres
+         - Land type/topography from DB: ${profile?.typography ?? 'general land'}
+         - Farmer address from DB: ${profile?.address ?? 'unknown'}
+         - Soil report from DB:
+${soilContext}
+         - Farmer wants to start around: ${startDate}${assessmentText}${forecastBlock}
+
+         Write every farmer-facing text value (cropName, reason, season, estimatedRevenue) in ${outputLanguage}.
+         Keep JSON keys, numbers, and currency digits in standard format.
+
+         Using the district (from the address), the soil report, the season/forecast, and the farmer's experience and irrigation above, choose the 3 most suitable, realistic and profitable crops to start around ${startDate}. Prefer crops that fit the soil and water situation and that the farmer can manage at their experience level.
+         Return JSON only:
+         {
+           "suggestedCrops": [
+             {
+               "cropName": "...",
+               "reason": "1-2 sentences on why this crop suits THIS farmer's land, soil, water and season",
+               "season": "the season/window it fits (e.g. Kharif / Samba / Rabi)",
+               "estimatedRevenue": "approx revenue range for their land size, e.g. ₹45,000–₹60,000",
+               "totalBudgetEstimate": number (approx total input cost in INR for their land size)
+             }
+           ]
+         }
+         Return exactly 3 crops and only valid JSON.`;
+
+  try {
+    const res = await chatWithBedrock(
+      [{ role: 'user', content: prompt }],
+      `You are FarmAdvisor, an expert Tamil Nadu agricultural planner. Return one valid JSON object only. Recommend crops that realistically fit the farmer's district, soil, water and season. Write farmer-facing text in ${outputLanguage}. Do not invent soil values, prices or weather not provided.`,
+      { json: true, maxTokens: 1500 }
+    );
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(res);
+    } catch {
+      const m = res.match(/\{[\s\S]*\}/);
+      parsed = m ? JSON.parse(m[0]) : {};
+    }
+    const raw = Array.isArray(parsed.suggestedCrops) ? parsed.suggestedCrops : [];
+    const mapped = raw
+      .map((c) => toSuggestionSummary(c, startDate))
+      .filter((c): c is CropSuggestionSummary => c !== null)
+      .slice(0, 3);
+    if (mapped.length) return mapped;
+  } catch (err) {
+    console.error('Crop suggestion AI failed, using rule-based shortlist:', err);
+  }
+
+  return fallbackSuggestions(ctx);
 }
 
 // Normalize the various LLM JSON shapes into the CropPlan the UI expects.
@@ -370,6 +512,26 @@ export async function POST(req: NextRequest) {
       ? `\n\n16-day weather forecast for the farmer's land (use this to schedule weather-sensitive stages — sowing, spraying, fertilizing, harvesting — away from heavy rain/storm days where possible):\n${forecastSummaryForPrompt(forecast)}`
       : '';
 
+    // "Not sure what to grow": return a lightweight 3-crop shortlist for the
+    // farmer to choose from. The full detailed plan is generated only once they
+    // pick a crop (via a normal planning_specific request).
+    if (data.farmerState === 'planning_unsure') {
+      const suggestedCrops = await suggestCrops({
+        profile,
+        soilData,
+        soilContext,
+        assessmentText,
+        forecastBlock,
+        outputLanguage,
+        locale: data.locale,
+        startDate,
+      });
+      return NextResponse.json({ planData: { suggestedCrops } });
+    }
+
+    // Every remaining flow names a crop (enforced by the schema).
+    const cropName = data.cropName as string;
+
     // Shared instruction: every milestone must be detailed, dated as a range
     // anchored on the farmer's chosen start date, and say exactly what to do.
     const milestoneSpec = `Each milestone object MUST have:
@@ -390,8 +552,8 @@ export async function POST(req: NextRequest) {
          - Keep text farmer-friendly and actionable. Avoid vague tasks like "monitor regularly" unless you say what to check and what action to take.
          - Return JSON only. Do not wrap it in markdown.`;
 
-    const planPrompt = data.farmerState === 'planning_unsure' || data.farmerState === 'planning_specific'
-      ? `Validate and create a detailed crop plan for growing ${data.cropName} for a Tamil Nadu farmer:
+    const planPrompt = data.farmerState === 'planning_specific'
+      ? `Validate and create a detailed crop plan for growing ${cropName} for a Tamil Nadu farmer:
          - Land: ${profile?.land_area_acres ?? 'unknown'} acres
          - Land type/topography from DB: ${profile?.typography ?? 'general land'}
          - Farmer address from DB: ${profile?.address ?? 'unknown'}
@@ -403,7 +565,7 @@ ${soilContext}
          Write every farmer-facing text value in ${outputLanguage}: cropName, suitabilityReason, adjustments, milestone labels, tasks, weatherRequirement, sellWindow, and storageNotes.
          Keep JSON keys, dates, IDs, numbers, and currency values in English/standard format.
 
-         First check whether ${data.cropName} can realistically grow in this farmer's area/land/soil using the DB details above.
+         First check whether ${cropName} can realistically grow in this farmer's area/land/soil using the DB details above.
          If suitable, create the plan. If only conditionally suitable, still create the plan but include required adjustments.
          Use the soil report to customize land preparation, organic matter improvement, fertilizer planning, micronutrient correction, irrigation/salinity cautions, nutrient management, and pest/disease prevention stages. Do not invent soil values that are not in the report.
          Return JSON:
@@ -412,7 +574,7 @@ ${soilContext}
            "suitabilityReason": "...",
            "adjustments": "...",
            "plan": {
-             "cropName": "${data.cropName}",
+             "cropName": "${cropName}",
              "startDate": "${startDate}",
              "milestones": [ ...detailed milestones... ],
              "totalBudgetEstimate": 0,
@@ -424,7 +586,7 @@ ${soilContext}
          ${milestoneSpec}
          Return only valid JSON.`
       : `Assess current growing status for this farmer who is mid-season:
-         - Selected crop: ${data.cropName}
+         - Selected crop: ${cropName}
          - Crop info: ${data.currentCropInfo ?? 'unknown'}
          - Land: ${profile?.land_area_acres ?? 'unknown'} acres
          - Land type/topography from DB: ${profile?.typography ?? 'general land'}
@@ -436,13 +598,13 @@ ${soilContext}
          Write every farmer-facing text value in ${outputLanguage}: cropName, currentStage, milestone labels, tasks, weatherRequirement, sellWindow, storageNotes, and immediateAction.
          Keep JSON keys, dates, IDs, numbers, and currency values in English/standard format.
 
-         First check whether ${data.cropName} can realistically grow in this farmer's area/land/soil using the DB details above.
+         First check whether ${cropName} can realistically grow in this farmer's area/land/soil using the DB details above.
          If suitable, create a remaining-stage plan for the selected crop. If conditionally suitable, include corrective adjustments in the tasks.
          Use the soil report to customize immediate action, organic matter improvement, fertilizer planning, micronutrient correction, irrigation/salinity cautions, nutrient management, and pest/disease prevention stages. Do not invent soil values that are not in the report.
 
          Return a JSON plan with the REMAINING stages from today onward and current status:
          {
-           "cropName": "${data.cropName}",
+           "cropName": "${cropName}",
            "currentStage": "...",
            "startDate": "${today}",
            "remainingMilestones": [ ...detailed milestones, first one starting today... ],
@@ -481,9 +643,9 @@ Make the plan practical for a farmer to execute in the field.${memoryContext ? `
       console.error('Crop plan AI generation failed, using fallback plan:', err);
       planData = {
         suitable: true,
-        suitabilityReason: `${data.cropName} can be planned using the farmer profile and soil details available in the database.`,
+        suitabilityReason: `${cropName} can be planned using the farmer profile and soil details available in the database.`,
         adjustments: 'Confirm exact seed variety and fertilizer dose with local advisory before field application.',
-        plan: buildFallbackPlan(data.cropName, startDate, profile, soilData),
+        plan: buildFallbackPlan(cropName, startDate, profile, soilData),
       };
     }
 
@@ -491,20 +653,20 @@ Make the plan practical for a farmer to execute in the field.${memoryContext ? `
     const matchingSuggestion = suggestedCrops.find((crop) => {
       if (!crop || typeof crop !== 'object') return false;
       const candidate = (crop as Record<string, unknown>).cropName ?? (crop as Record<string, unknown>).crop_name;
-      return String(candidate ?? '').toLowerCase() === data.cropName.toLowerCase();
+      return String(candidate ?? '').toLowerCase() === cropName.toLowerCase();
     }) as Record<string, unknown> | undefined;
     let rawPlan = (planData.plan ?? matchingSuggestion ?? planData) as Record<string, unknown>;
     if (!rawPlan.milestones && !rawPlan.remainingMilestones) {
-      rawPlan = buildFallbackPlan(data.cropName, startDate, profile, soilData) as unknown as Record<string, unknown>;
+      rawPlan = buildFallbackPlan(cropName, startDate, profile, soilData) as unknown as Record<string, unknown>;
       planData.plan = rawPlan;
     }
-    const normalized = normalizePlan(rawPlan, startDate, data.cropName);
+    const normalized = normalizePlan(rawPlan, startDate, cropName);
     if (normalized) {
       normalized.milestones = annotateMilestonesWithWeather(normalized.milestones, forecast);
       planData.plan = normalized;
       const inputDetails = {
         farmerState: data.farmerState,
-        selectedCrop: data.cropName,
+        selectedCrop: cropName,
         currentCropInfo: data.currentCropInfo ?? '',
         assessment: data.assessment ?? {},
         startDate,

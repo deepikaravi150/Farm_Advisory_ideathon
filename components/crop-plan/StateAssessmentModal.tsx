@@ -25,13 +25,19 @@ interface Question {
   // to the LLM, while the displayed labels come from translations (same order).
   values?: string[];
   optional?: boolean;
+  // Translation key for the question prompt. Defaults to `${key}.q`; `crop`-type
+  // questions fall back to `finalCropLabel` when no key is given.
+  labelKey?: string;
   showIf?: (a: Record<string, string>) => boolean;
 }
 
-// `showIf` makes the series dynamic: a farmer who has never grown anything on
-// this land never sees the previous-crop questions.
-const QUESTIONS: Question[] = [
-  { key: 'cropName', type: 'crop' },
+// `showIf` makes each series dynamic: a farmer who has never grown anything on
+// this land never sees the previous-crop questions, and the mid-season symptom
+// question only appears when the crop isn't healthy.
+const CROP_QUESTION: Question = { key: 'cropName', type: 'crop' };
+
+// Shared land/experience questions used by the planning flows.
+const LAND_QUESTIONS: Question[] = [
   { key: 'experience', type: 'single', values: ['New to farming', 'Less than 3 years', '3–10 years', 'More than 10 years'] },
   { key: 'grownBefore', type: 'single', values: ['Yes', 'No'] },
   { key: 'previousCrops', type: 'text', showIf: a => a.grownBefore === 'Yes' },
@@ -41,6 +47,26 @@ const QUESTIONS: Question[] = [
   { key: 'irrigation', type: 'single', values: ['Rain-fed only', 'Borewell', 'Canal', 'Open well / pond', 'Drip / sprinkler'] },
   { key: 'fertilizers', type: 'single', values: ['None', 'Chemical', 'Organic', 'Both chemical & organic'] },
 ];
+
+// Mid-season questions: which crop, what stage, how long, and how it's doing.
+const MID_GROW_QUESTIONS: Question[] = [
+  { key: 'cropName', type: 'crop', labelKey: 'midCropLabel' },
+  { key: 'currentStage', type: 'single', values: ['Just sown / germinating', 'Seedling / early growth', 'Vegetative growth', 'Flowering', 'Fruiting / grain filling', 'Near harvest'] },
+  { key: 'sowedWhen', type: 'text' },
+  { key: 'cropHealth', type: 'single', values: ['Healthy', 'Some issues', 'Struggling'] },
+  { key: 'symptoms', type: 'text', optional: true, showIf: a => Boolean(a.cropHealth) && a.cropHealth !== 'Healthy' },
+  { key: 'irrigation', type: 'single', values: ['Rain-fed only', 'Borewell', 'Canal', 'Open well / pond', 'Drip / sprinkler'] },
+  { key: 'fertilizers', type: 'single', values: ['None', 'Chemical', 'Organic', 'Both chemical & organic'] },
+];
+
+// Each situation asks a different set: "not sure" never names a crop (the AI
+// suggests one), "crop in mind" names it first, and "mid-grow" gathers the
+// current crop's stage and health.
+function questionsFor(state: FarmerState): Question[] {
+  if (state === 'planning_unsure') return LAND_QUESTIONS;
+  if (state === 'mid_grow') return MID_GROW_QUESTIONS;
+  return [CROP_QUESTION, ...LAND_QUESTIONS];
+}
 
 export default function StateAssessmentModal({ onSubmit, loading, onClose }: Props) {
   const t = useTranslations('assessment');
@@ -55,8 +81,8 @@ export default function StateAssessmentModal({ onSubmit, loading, onClose }: Pro
   const [startDate, setStartDate] = useState(today);
 
   const visible = useMemo(
-    () => QUESTIONS.filter(q => !q.showIf || q.showIf(answers)),
-    [answers]
+    () => questionsFor(state).filter(q => !q.showIf || q.showIf(answers)),
+    [state, answers]
   );
   const current = visible[idx];
 
@@ -64,6 +90,7 @@ export default function StateAssessmentModal({ onSubmit, loading, onClose }: Pro
     setState(s);
     setAnswers({});
     setCropName('');
+    setInfo('');
     setIdx(0);
     setPhase('questions');
   }
@@ -93,6 +120,8 @@ export default function StateAssessmentModal({ onSubmit, loading, onClose }: Pro
   function buildAssessment(): Record<string, string> {
     const out: Record<string, string> = {};
     for (const q of visible) {
+      // cropName is sent separately as the plan's crop, not as an assessment line.
+      if (q.key === 'cropName') continue;
       const v = answers[q.key];
       if (v && v.trim()) out[q.key] = v.trim();
     }
@@ -101,10 +130,17 @@ export default function StateAssessmentModal({ onSubmit, loading, onClose }: Pro
 
   function submitFinal() {
     const assessment = buildAssessment();
-    if (state === 'planning_specific') onSubmit(state, { cropName, startDate, assessment });
-    else if (state === 'mid_grow') onSubmit(state, { cropName, info, assessment });
+    if (state === 'mid_grow') onSubmit(state, { cropName, info, assessment });
+    else if (state === 'planning_unsure') onSubmit(state, { startDate, assessment });
     else onSubmit(state, { cropName, startDate, assessment });
   }
+
+  // For "not sure what to grow" the AI picks the crop, so no crop name is needed.
+  const cropRequired = state !== 'planning_unsure';
+  const submitLabel =
+    state === 'planning_unsure' ? t('getSuggestions') :
+    state === 'mid_grow' ? t('assessCrop') :
+    t('generatePlan');
 
   const total = visible.length;
 
@@ -162,7 +198,11 @@ export default function StateAssessmentModal({ onSubmit, loading, onClose }: Pro
             </div>
 
             <p className="font-medium text-gray-800">
-              {current.type === 'crop' ? t('finalCropLabel') : t(`${current.key}.q`)}
+              {current.labelKey
+                ? t(current.labelKey)
+                : current.type === 'crop'
+                  ? t('finalCropLabel')
+                  : t(`${current.key}.q`)}
             </p>
 
             {current.type === 'single' && (
@@ -237,11 +277,7 @@ export default function StateAssessmentModal({ onSubmit, loading, onClose }: Pro
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              if (
-                !loading &&
-                cropName.trim() &&
-                (state !== 'mid_grow' || info.trim())
-              ) {
+              if (!loading && (!cropRequired || cropName.trim())) {
                 submitFinal();
               }
             }}
@@ -254,7 +290,7 @@ export default function StateAssessmentModal({ onSubmit, loading, onClose }: Pro
 
             {state === 'mid_grow' && (
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">{t('finalMidLabel')}</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{t('finalMidNoteLabel')}</label>
                 <textarea value={info} onChange={e => setInfo(e.target.value)} rows={3}
                   className="w-full border border-gray-300 rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-400 resize-none"
                   placeholder={t('finalMidPlaceholder')} />
@@ -279,14 +315,10 @@ export default function StateAssessmentModal({ onSubmit, loading, onClose }: Pro
             )}
 
             <button type="submit"
-              disabled={
-                loading ||
-                !cropName.trim() ||
-                (state === 'mid_grow' && !info.trim())
-              }
+              disabled={loading || (cropRequired && !cropName.trim())}
               className="w-full bg-brand-600 text-white py-3 rounded-xl hover:bg-brand-700 disabled:opacity-40 flex items-center justify-center gap-2">
               {loading && <Loader2 className="w-4 h-4 animate-spin" />}
-              Save New Plan
+              {submitLabel}
             </button>
           </form>
         )}

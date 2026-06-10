@@ -367,6 +367,9 @@ export default function CropPlanPage() {
   const [loading, setLoading] = useState(false);
   const [savedPlans, setSavedPlans] = useState<SavedPlan[]>([]);
   const [suggestions, setSuggestions] = useState<SuggestedCrop[]>([]);
+  // The answers that produced the current suggestions — reused to generate the
+  // full plan when the farmer picks one of the suggested crops.
+  const [suggestionContext, setSuggestionContext] = useState<{ assessment?: Record<string, string>; startDate?: string } | null>(null);
   const [activePlan, setActivePlan] = useState<ActiveCropPlan | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -485,10 +488,42 @@ export default function CropPlanPage() {
     }
   }
 
+  // Shared handling for a generated-plan API response: prefer the server-saved
+  // plan, fall back to client-side save, else surface an error.
+  async function applyGeneratedPlan(
+    data: { planData?: { plan?: CropPlan; savedPlan?: Record<string, unknown>; inputDetails?: Record<string, unknown> } },
+    fallbackInputDetails: Record<string, unknown>
+  ) {
+    const p = data.planData?.plan ?? (data.planData as CropPlan | undefined);
+    const saved = data.planData?.savedPlan ? toSavedPlan(data.planData.savedPlan) : null;
+    if (saved) {
+      setSavedPlans(prev => upsertSavedPlan(prev, saved));
+      setActivePlan(saved);
+      setPendingInputDetails(null);
+      await refreshPlans();
+      return;
+    }
+    if (p?.cropName) {
+      const inputDetails = (data.planData?.inputDetails ?? fallbackInputDetails) as Record<string, unknown>;
+      const savedFallback = await savePlan(p, inputDetails);
+      if (savedFallback) {
+        setActivePlan(savedFallback);
+        await refreshPlans();
+      } else {
+        setActivePlan(p);
+        setPendingInputDetails(inputDetails);
+        setPlanError('Plan was created, but saving failed. Click Save to Saved Plans to try again.');
+      }
+      return;
+    }
+    setPlanError('Plan was not created. Please try again.');
+  }
+
   async function onAssessmentSubmit(state: FarmerState, payload: AssessmentPayload) {
     setLoading(true);
     setShowModal(false);
     setSuggestions([]);
+    setSuggestionContext(null);
     setPlanError('');
     try {
       const res = await fetch('/api/crop-plan', {
@@ -504,46 +539,64 @@ export default function CropPlanPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(typeof data?.error === 'string' ? data.error : 'Plan generation failed');
-      const p = data.planData?.plan ?? data.planData;
-      const saved = data.planData?.savedPlan ? toSavedPlan(data.planData.savedPlan) : null;
-      if (saved) {
-        setSavedPlans(prev => upsertSavedPlan(prev, saved));
-        setActivePlan(saved);
-        setPendingInputDetails(null);
-        await refreshPlans();
-      } else if (p?.cropName) {
-        const inputDetails = (data.planData?.inputDetails ?? {
-          farmerState: state,
-          selectedCrop: payload.cropName,
-          currentCropInfo: payload.info ?? '',
-          assessment: payload.assessment,
-          startDate: payload.startDate,
-        }) as Record<string, unknown>;
-        const savedFallback = await savePlan(p, inputDetails);
-        if (savedFallback) {
-          setActivePlan(savedFallback);
-          await refreshPlans();
-        } else {
-          setActivePlan(p);
-          setPendingInputDetails(inputDetails);
-          setPlanError('Plan was created, but saving failed. Click Save to Saved Plans to try again.');
-        }
-      } else {
-        setPlanError('Plan was not created. Please try again.');
+
+      // "Not sure what to grow": show the AI crop shortlist instead of a plan.
+      // Remember the answers so we can build the full plan when one is picked.
+      const suggested = data.planData?.suggestedCrops;
+      if (Array.isArray(suggested) && suggested.length) {
+        setSuggestions(suggested);
+        setSuggestionContext({ assessment: payload.assessment, startDate: payload.startDate });
+        return;
       }
+      if (state === 'planning_unsure') {
+        setPlanError('No crop suggestions could be generated. Please try again.');
+        return;
+      }
+
+      await applyGeneratedPlan(data, {
+        farmerState: state,
+        selectedCrop: payload.cropName,
+        currentCropInfo: payload.info ?? '',
+        assessment: payload.assessment,
+        startDate: payload.startDate,
+      });
     } catch (err) {
       setPlanError(err instanceof Error ? err.message : 'Plan save failed. Please try again.');
     }
     finally { setLoading(false); }
   }
 
-  // Persist a crop the farmer picked from the AI suggestions so it shows up on
-  // their next visit.
+  // The farmer picked a crop from the AI shortlist — generate the full detailed
+  // plan for it, reusing the answers that produced the suggestions.
   async function selectSuggestedCrop(crop: SuggestedCrop) {
-    setActivePlan(crop);
     setSuggestions([]);
-    const saved = await savePlan(crop);
-    if (saved) setActivePlan(saved);
+    setLoading(true);
+    setPlanError('');
+    try {
+      const res = await fetch('/api/crop-plan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          farmerState: 'planning_specific',
+          cropName: crop.cropName,
+          startDate: suggestionContext?.startDate,
+          assessment: suggestionContext?.assessment,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(typeof data?.error === 'string' ? data.error : 'Plan generation failed');
+      await applyGeneratedPlan(data, {
+        farmerState: 'planning_specific',
+        selectedCrop: crop.cropName,
+        assessment: suggestionContext?.assessment,
+        startDate: suggestionContext?.startDate,
+      });
+    } catch (err) {
+      setPlanError(err instanceof Error ? err.message : 'Plan generation failed. Please try again.');
+    } finally {
+      setLoading(false);
+      setSuggestionContext(null);
+    }
   }
 
   // Apply a plan change the farmer confirmed from the chat panel, and persist it.
@@ -850,6 +903,14 @@ export default function CropPlanPage() {
           </div>
         )}
 
+        {/* Recommended crops for the farmer's land — shown after the "not sure
+            what to grow" flow, between the saved plans and the current stage. */}
+        {!loading && suggestions.length > 0 && (
+          <div className="mb-6">
+            <CropSuggestions crops={suggestions} onSelect={selectSuggestedCrop} />
+          </div>
+        )}
+
         {/* Three at-a-glance sections: where the plan stands, what the crop needs,
             and how the land looks for it. */}
         {!loading && activePlan && displayPlan && (
@@ -886,10 +947,6 @@ export default function CropPlanPage() {
             <p className="text-brand-700 font-medium">{t('generatingTitle')}</p>
             <p className="text-sm text-gray-500 mt-1">{t('generatingSubtitle')}</p>
           </div>
-        )}
-
-        {!loading && suggestions.length > 0 && (
-          <CropSuggestions crops={suggestions} onSelect={selectSuggestedCrop} />
         )}
 
         {!loading && activePlan && displayPlan && localizedDisplayPlan && (
