@@ -12,6 +12,9 @@ import { mirrorCropPlanToS3, deleteCropPlanFromS3, tryMirror } from '@/lib/farme
 import { getSuitableCrops, type SoilSnapshot } from '@/lib/crop-suitability';
 import { getCropInfo } from '@/lib/crop-info';
 
+// Plan generation makes a large LLM call; allow up to 60s on Vercel.
+export const maxDuration = 60;
+
 /** Best-effort 16-day forecast for the farmer's saved land centroid. */
 async function getFarmerForecast(profile: Record<string, unknown> | null): Promise<ForecastDay[]> {
   try {
@@ -310,17 +313,18 @@ function buildFallbackPlan(
     ? `Current soil report details:\n${formatSoilReportContext(soilData)}`
     : 'No soil report is available, so confirm nutrient dose locally before applying fertilizer.';
   const stages = [
-    { label: 'Land Preparation', offset: 0, days: 7, cost: 12000, task: `Clear weeds, plough the field, break clods, and level the land for ${crop}. Add well-decomposed farmyard manure and improve drainage based on the field slope. ${soilNote}` },
-    { label: 'Seed Selection and Treatment', offset: 7, days: 2, cost: 3500, task: `Buy healthy ${crop} seed from a reliable source. Treat seed with recommended biofertilizer or fungicide before sowing, and keep enough seed for gap filling.` },
-    { label: 'Sowing', offset: 9, days: 3, cost: 9000, task: `Sow ${crop} at the right spacing for your local variety. Keep soil moist during germination, avoid sowing before heavy rain, and mark rows clearly for easy weeding.` },
-    { label: 'Irrigation and Weed Control', offset: 12, days: 21, cost: 8500, task: `Maintain light, regular irrigation according to soil moisture. Remove weeds early, especially during the first three weeks, so ${crop} does not compete for nutrients.` },
-    { label: 'Nutrient and Pest Management', offset: 33, days: 28, cost: 14500, task: `Apply nutrients in split doses based on the soil report and crop growth. Inspect leaves, stems, and flowers twice a week, and use biological or recommended chemical control only when symptoms are seen.` },
-    { label: 'Harvesting and Selling', offset: 61, days: 14, cost: 10000, task: `Harvest ${crop} when the crop reaches maturity and moisture is suitable. Dry, grade, and store the produce cleanly before selling during the best local market window.` },
+    { label: 'Land Preparation', summary: 'Plough, level and add manure to ready the field.', offset: 0, days: 7, cost: 12000, task: `Clear weeds, plough the field, break clods, and level the land for ${crop}. Add well-decomposed farmyard manure and improve drainage based on the field slope. ${soilNote}` },
+    { label: 'Seed Selection and Treatment', summary: 'Buy healthy seed and treat it before sowing.', offset: 7, days: 2, cost: 3500, task: `Buy healthy ${crop} seed from a reliable source. Treat seed with recommended biofertilizer or fungicide before sowing, and keep enough seed for gap filling.` },
+    { label: 'Sowing', summary: 'Sow at correct spacing and keep soil moist.', offset: 9, days: 3, cost: 9000, task: `Sow ${crop} at the right spacing for your local variety. Keep soil moist during germination, avoid sowing before heavy rain, and mark rows clearly for easy weeding.` },
+    { label: 'Irrigation and Weed Control', summary: 'Water lightly and remove weeds early.', offset: 12, days: 21, cost: 8500, task: `Maintain light, regular irrigation according to soil moisture. Remove weeds early, especially during the first three weeks, so ${crop} does not compete for nutrients.` },
+    { label: 'Nutrient and Pest Management', summary: 'Apply split fertilizer and watch for pests.', offset: 33, days: 28, cost: 14500, task: `Apply nutrients in split doses based on the soil report and crop growth. Inspect leaves, stems, and flowers twice a week, and use biological or recommended chemical control only when symptoms are seen.` },
+    { label: 'Harvesting and Selling', summary: 'Harvest at maturity, dry, grade and sell.', offset: 61, days: 14, cost: 10000, task: `Harvest ${crop} when the crop reaches maturity and moisture is suitable. Dry, grade, and store the produce cleanly before selling during the best local market window.` },
   ];
 
   const milestones = stages.map((stage, index) => ({
     id: String(index + 1),
     label: stage.label,
+    summary: stage.summary,
     date: addDays(startDate, stage.offset),
     endDate: addDays(startDate, stage.offset + stage.days),
     durationDays: stage.days,
@@ -538,6 +542,7 @@ export async function POST(req: NextRequest) {
            {
              "id": "1",
              "label": "short stage name",
+             "summary": "ONE short at-a-glance sentence (max ~12 words) a farmer can read in 2 seconds, e.g. 'Plough, level and add manure to ready the field'",
              "date": "YYYY-MM-DD (stage start)",
              "endDate": "YYYY-MM-DD (stage end)",
              "durationDays": number,
@@ -562,7 +567,7 @@ ${soilContext}
          - Today: ${today}
          - Farmer wants to start on: ${startDate}${assessmentText}${forecastBlock}
 
-         Write every farmer-facing text value in ${outputLanguage}: cropName, suitabilityReason, adjustments, milestone labels, tasks, weatherRequirement, sellWindow, and storageNotes.
+         Write every farmer-facing text value in ${outputLanguage}: cropName, suitabilityReason, adjustments, milestone labels, summaries, tasks, weatherRequirement, sellWindow, and storageNotes.
          Keep JSON keys, dates, IDs, numbers, and currency values in English/standard format.
 
          First check whether ${cropName} can realistically grow in this farmer's area/land/soil using the DB details above.
@@ -595,7 +600,7 @@ ${soilContext}
 ${soilContext}
          - Today: ${today}${assessmentText}${forecastBlock}
 
-         Write every farmer-facing text value in ${outputLanguage}: cropName, currentStage, milestone labels, tasks, weatherRequirement, sellWindow, storageNotes, and immediateAction.
+         Write every farmer-facing text value in ${outputLanguage}: cropName, currentStage, milestone labels, summaries, tasks, weatherRequirement, sellWindow, storageNotes, and immediateAction.
          Keep JSON keys, dates, IDs, numbers, and currency values in English/standard format.
 
          First check whether ${cropName} can realistically grow in this farmer's area/land/soil using the DB details above.

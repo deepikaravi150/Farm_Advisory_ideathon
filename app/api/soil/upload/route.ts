@@ -7,6 +7,9 @@ import { putItem, queryItems, updateItem, Tables } from '@/lib/aws/dynamodb';
 import { generateId } from '@/lib/utils';
 import { farmerS3Keys, mirrorJsonToS3, tryMirror } from '@/lib/farmer-s3-store';
 
+// Soil-report extraction (vision/PDF) is slow; allow up to 60s on Vercel.
+export const maxDuration = 60;
+
 function getAuthFarmer(req: NextRequest) {
   const token = req.cookies.get('auth_token')?.value;
   return token ? verifyToken(token) : null;

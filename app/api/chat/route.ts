@@ -10,6 +10,9 @@ import { buildS3Key, uploadToS3 } from '@/lib/aws/s3';
 import { formatMemoryForPrompt, type Fact } from '@/lib/memory';
 import { buildDiagnosisPrompt, parseDiagnosis, formatDiagnosisForPrompt, type Diagnosis } from '@/lib/crop-doctor';
 
+// Chat (and crop-photo vision diagnosis) can take a while; allow up to 60s on Vercel.
+export const maxDuration = 60;
+
 function getAuthFarmer(req: NextRequest) {
   const token = req.cookies.get('auth_token')?.value;
   return token ? verifyToken(token) : null;
@@ -48,6 +51,7 @@ const HistorySchema = z.array(z.object({
 const ChatSchema = z.object({
   message: z.string().min(1),
   locale: z.enum(['en', 'hi', 'ta']).default('en'),
+  mode: z.enum(['normal', 'checkin']).default('normal'),
   history: HistorySchema,
   chatId: z.string().optional(),
   chatTimestamp: z.string().optional(),
@@ -66,6 +70,7 @@ export async function POST(req: NextRequest) {
 
     let message: string;
     let locale: 'en' | 'hi' | 'ta';
+    let mode: 'normal' | 'checkin' = 'normal';
     let history: Message[];
     let chatId: string | undefined;
     let chatTimestamp: string | undefined;
@@ -76,6 +81,7 @@ export async function POST(req: NextRequest) {
       imageFile = (form.get('file') as File | null) ?? null;
       const rawLocale = String(form.get('locale') ?? 'en');
       locale = (['en', 'hi', 'ta'].includes(rawLocale) ? rawLocale : 'en') as 'en' | 'hi' | 'ta';
+      mode = String(form.get('mode') ?? 'normal') === 'checkin' ? 'checkin' : 'normal';
       const caption = String(form.get('message') ?? '').trim();
       message = caption || (locale === 'ta'
         ? '[பயிர் புகைப்படம்] என் பயிரை பாருங்கள்.'
@@ -91,6 +97,7 @@ export async function POST(req: NextRequest) {
       const parsed = ChatSchema.parse(await req.json());
       message = parsed.message;
       locale = parsed.locale;
+      mode = parsed.mode;
       history = parsed.history;
       chatId = parsed.chatId;
       chatTimestamp = parsed.chatTimestamp;
@@ -210,6 +217,7 @@ ${contextSummaries ? `Recent conversation context:\n${contextSummaries}` : ''}
 
 ${kbContext ? `Reference knowledge (from the farming knowledge base — prefer this over general knowledge and cite the source when you use it):\n${kbContext}` : ''}
 
+${mode === 'checkin' ? `CHECK-IN MODE: This is the farmer's daily field check-in. Treat the conversation as a quick status update on their current crop and stage. Acknowledge what they report, ask one short, relevant follow-up about crop condition, pests/disease, water, or growth at the CURRENT stage, and give the single most useful next action. Keep it warm and brief.\n` : ''}
 ${languageInstruction}
 Response rules:
 - Be concise: 3-6 short bullets or short paragraphs unless the farmer asks for a detailed plan.

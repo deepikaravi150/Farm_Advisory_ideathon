@@ -1,6 +1,8 @@
 export interface Milestone {
   id: string;
   label: string;
+  /** One short at-a-glance sentence describing the stage (shown collapsed). */
+  summary?: string;
   /** Stage start date (YYYY-MM-DD). */
   date: string;
   /** Stage end date (YYYY-MM-DD). Derived from date + durationDays when absent. */

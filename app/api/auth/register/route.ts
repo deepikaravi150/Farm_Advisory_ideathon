@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { putItem, getItem, Tables } from '@/lib/aws/dynamodb';
-import { hashPassword } from '@/lib/auth';
+import { signToken, type JWTPayload } from '@/lib/auth';
 import { generateId } from '@/lib/utils';
-import { findFarmersByPhone } from '@/app/api/auth/farmers';
-import { verifyPhoneVerificationOtp } from '@/lib/aws/sns';
+import { verifyOtp } from '@/lib/otp';
+import { getGovFarmerRecord } from '@/lib/synthetic-gov-data';
 import { toTenDigitPhone } from '@/lib/phone';
 import { mirrorProfileToS3, tryMirror } from '@/lib/farmer-s3-store';
 
@@ -15,77 +15,91 @@ function requireAwsEnv() {
   }
 }
 
-const PasswordSchema = z.string()
-  .min(8, 'Password must be at least 8 characters')
-  .regex(/[A-Z]/, 'Password must include an uppercase letter')
-  .regex(/[a-z]/, 'Password must include a lowercase letter')
-  .regex(/\d/, 'Password must include a number')
-  .regex(/[^A-Za-z0-9]/, 'Password must include a special character');
-
 const RegisterSchema = z.object({
   farmerId: z.string()
     .transform((value) => value.trim().toUpperCase())
     .pipe(z.string().regex(/^TN\d{11}$/, 'Farmer ID must be TN followed by 11 digits')),
-  name: z.string().min(2, 'Name is required'),
   phone: z.preprocess((value) => toTenDigitPhone(String(value ?? '')), z.string().regex(/^\d{10}$/, 'Enter a valid 10-digit phone number')),
-  address: z.string().min(3, 'Address is required'),
-  landCoordinates: z.array(z.object({ lat: z.number(), lng: z.number() })).min(3),
-  typography: z.string().optional(),
-  landAreaAcres: z.number().positive(),
-  landPictureS3Key: z.string().optional(),
-  password: PasswordSchema,
-  otp: z.string().regex(/^\d{6}$/, 'Enter the 6-digit OTP sent to the phone number'),
-  preferredLanguage: z.enum(['en', 'hi', 'ta']).default('en'),
+  otp: z.string().regex(/^\d{6}$/, 'Enter the 6-digit OTP'),
 });
+
+/** Build the auth cookie + locale cookie on a JSON response. */
+function withSession(payload: JWTPayload, locale: string, body: Record<string, unknown>) {
+  const response = NextResponse.json(body);
+  response.cookies.set('auth_token', signToken(payload), {
+    httpOnly: true,
+    secure: process.env.COOKIE_SECURE === 'true',
+    sameSite: 'lax',
+    maxAge: 60 * 60 * 24 * 7,
+    path: '/',
+  });
+  response.cookies.set('locale', locale, {
+    sameSite: 'lax',
+    maxAge: 60 * 60 * 24 * 365,
+    path: '/',
+  });
+  return response;
+}
 
 export async function POST(req: NextRequest) {
   try {
     requireAwsEnv();
-    const body = await req.json();
-    const data = RegisterSchema.parse(body);
+    const { farmerId, phone, otp } = RegisterSchema.parse(await req.json());
 
-    // Check if farmer ID or phone already exists
-    const existing = await getItem(Tables.FARMER_PROFILES, { farmer_id: data.farmerId });
+    await verifyOtp(phone, otp);
+
+    // Pull the farmer's details from the (synthetic) government registry.
+    const gov = getGovFarmerRecord(farmerId, phone);
+    if (!gov) {
+      return NextResponse.json(
+        { error: 'No government record found for this Farmer ID and phone number.' },
+        { status: 404 },
+      );
+    }
+
+    // Already onboarded? Just re-issue the session and let them in.
+    const existing = await getItem(Tables.FARMER_PROFILES, { farmer_id: gov.farmer_id });
     if (existing) {
-      return NextResponse.json({ error: 'Farmer ID already registered' }, { status: 409 });
+      return withSession(
+        { farmerId: gov.farmer_id, phone: gov.phone, name: gov.name },
+        gov.preferred_language,
+        { success: true, alreadyRegistered: true, farmerId: gov.farmer_id },
+      );
     }
-
-    const existingPhone = await findFarmersByPhone(data.phone);
-    if (existingPhone.length) {
-      return NextResponse.json({ error: 'Phone number already registered' }, { status: 409 });
-    }
-
-    await verifyPhoneVerificationOtp(data.phone, data.otp);
-
-    const passwordHash = await hashPassword(data.password);
-    const uniqueId = generateId();
 
     const profileItem = {
-      farmer_id: data.farmerId,
-      unique_id: uniqueId,
-      phone: data.phone,
-      name: data.name,
-      address: data.address,
-      land_coordinates: data.landCoordinates,
-      typography: data.typography ?? '',
-      land_area_acres: data.landAreaAcres,
-      land_picture_s3_key: data.landPictureS3Key ?? '',
+      farmer_id: gov.farmer_id,
+      unique_id: generateId(),
+      phone: gov.phone,
+      name: gov.name,
+      address: gov.address,
+      district: gov.district,
+      land_coordinates: gov.land_coordinates,
+      typography: gov.typography,
+      land_area_acres: gov.land_area_acres,
+      land_picture_s3_key: '',
       phone_verified: true,
       phone_verified_at: new Date().toISOString(),
-      password_hash: passwordHash,
-      preferred_language: data.preferredLanguage,
+      preferred_language: gov.preferred_language,
+      source: 'gov_registry_synthetic',
+      survey_number: gov.survey_number,
       created_at: new Date().toISOString(),
     };
 
     await putItem(Tables.FARMER_PROFILES, profileItem);
     await tryMirror('farmer profile register', () => mirrorProfileToS3(profileItem));
 
-    return NextResponse.json({ success: true, farmerId: data.farmerId });
+    return withSession(
+      { farmerId: gov.farmer_id, phone: gov.phone, name: gov.name },
+      gov.preferred_language,
+      { success: true, farmerId: gov.farmer_id },
+    );
   } catch (err) {
     if (err instanceof z.ZodError) {
       return NextResponse.json({ error: err.errors }, { status: 400 });
     }
+    const message = err instanceof Error ? err.message : 'Registration failed';
     console.error('Register error:', err);
-    return NextResponse.json({ error: 'Registration failed' }, { status: 500 });
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

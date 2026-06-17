@@ -9,6 +9,9 @@ import { annotateMilestonesWithWeather, forecastSummaryForPrompt } from '@/lib/c
 import { formatMemoryForPrompt, type Fact } from '@/lib/memory';
 import type { CropPlan, Milestone } from '@/lib/types/crop-plan';
 
+// Plan refinement returns a full updated plan; allow up to 60s on Vercel.
+export const maxDuration = 60;
+
 function getAuthFarmer(req: NextRequest) {
   const token = req.cookies.get('auth_token')?.value;
   return token ? verifyToken(token) : null;
@@ -111,11 +114,12 @@ The farmer will ask questions or request changes (shift dates, add/remove/reorde
 Respond with ONLY a valid JSON object:
 {
   "reply": "a short, friendly explanation of your answer or the change you are proposing",
-  "updatedPlan": null OR a COMPLETE updated plan object {cropName, startDate, milestones:[{id,label,date,endDate,durationDays,tasks,estimatedCost,weatherRequirement}], totalBudgetEstimate, harvestDate, sellWindow, storageNotes}
+  "updatedPlan": null OR a COMPLETE updated plan object {cropName, startDate, milestones:[{id,label,summary,date,endDate,durationDays,tasks,estimatedCost,weatherRequirement}], totalBudgetEstimate, harvestDate, sellWindow, storageNotes}
 }
 Rules:
 - Set "updatedPlan" to null when the farmer is only asking a question (no change needed).
 - When proposing a change, return the FULL plan with the changes applied (not a diff). Keep stage dates contiguous and consistent with durationDays.
+- Each stage's "summary" is ONE short at-a-glance sentence (max ~12 words); keep "tasks" as the detailed steps.
 - Keep every stage's "tasks" detailed and actionable, with specific field actions, timing, inputs, and cautions where relevant.
 - Use the latest soil report for fertilizer, micronutrient, organic matter, salinity/EC, pH, and irrigation-related advice. If the farmer requests a plan update, reflect relevant soil report findings in the updatedPlan tasks.
 - Do not invent unavailable soil values, market prices, government rules, or weather data.

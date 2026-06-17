@@ -16,6 +16,13 @@
     "profile": "Profile",
     "logout": "Logout"
   },
+  "tabs": {
+    "today": "Today",
+    "plan": "Crop Plan",
+    "chat": "Chat",
+    "money": "Money",
+    "profile": "Profile"
+  },
   "landing": {
     "tagline": "AI-powered crop planning, weather alerts, and personalized farming advice — built for Tamil Nadu farmers.",
     "login": "Login",
