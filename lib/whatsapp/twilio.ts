@@ -11,6 +11,26 @@ const FROM = process.env.TWILIO_WHATSAPP_FROM ?? '';
 // A single WhatsApp message body is capped at 1600 chars; stay safely under it.
 const MAX_BODY = 1500;
 
+/**
+ * Convert the model's Markdown into WhatsApp's lightweight markup so farmers
+ * don't see stray formatting characters. WhatsApp bold is a *single* asterisk
+ * (not Markdown's **double**), italic is _underscores_, and there are no #
+ * headings — so Markdown leaks through as literal `*`, `#`, etc. if not mapped.
+ */
+export function formatForWhatsApp(text: string): string {
+  return text
+    // # / ## / ### headings -> bold line (WhatsApp has no headings)
+    .replace(/^#{1,6}[ \t]+(.+?)[ \t]*$/gm, '*$1*')
+    // **bold** and __bold__ -> *bold*
+    .replace(/\*\*([^\n]+?)\*\*/g, '*$1*')
+    .replace(/__([^\n]+?)__/g, '*$1*')
+    // "* item" bullets -> "- item" so the leading * isn't read as bold
+    .replace(/^([ \t]*)\*[ \t]+/gm, '$1- ')
+    // [text](url) -> text (url)
+    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '$1 ($2)')
+    .trim();
+}
+
 export function isTwilioConfigured(): boolean {
   return Boolean(ACCOUNT_SID && AUTH_TOKEN && FROM);
 }
@@ -44,7 +64,7 @@ export async function sendWhatsApp(to: string, body: string): Promise<void> {
   const toAddr = to.startsWith('whatsapp:') ? to : `whatsapp:${to}`;
   const url = `https://api.twilio.com/2010-04-01/Accounts/${ACCOUNT_SID}/Messages.json`;
 
-  for (const part of chunkBody(body)) {
+  for (const part of chunkBody(formatForWhatsApp(body))) {
     const res = await fetch(url, {
       method: 'POST',
       headers: {
