@@ -3,6 +3,7 @@ import { findFarmersByPhone } from '@/app/api/auth/farmers';
 import { toTenDigitPhone } from '@/lib/phone';
 import { queryItems, Tables } from '@/lib/aws/dynamodb';
 import { generateChatReply, type Message } from '@/lib/chat-engine';
+import { transcribeAudio } from '@/lib/ai/openai';
 import {
   sendWhatsApp,
   downloadTwilioMedia,
@@ -33,6 +34,24 @@ const ERROR_REPLY: Record<Locale, string> = {
   hi: 'क्षमा करें, हमारी ओर से कुछ गड़बड़ हुई। कृपया थोड़ी देर बाद फिर प्रयास करें। 🙏',
   ta: 'மன்னிக்கவும், எங்கள் தரப்பில் ஏதோ தவறு ஏற்பட்டது. சிறிது நேரம் கழித்து மீண்டும் முயற்சிக்கவும். 🙏',
 };
+
+const VOICE_FAILED: Record<Locale, string> = {
+  en: "I couldn't process that voice note. Please try again, or send your question as text. 🎙️",
+  hi: 'मैं वह वॉइस नोट समझ नहीं पाया। कृपया दोबारा भेजें, या अपना सवाल टेक्स्ट में भेजें। 🎙️',
+  ta: 'அந்த குரல் செய்தியை என்னால் செயலாக்க முடியவில்லை. மீண்டும் முயற்சிக்கவும் அல்லது உங்கள் கேள்வியை உரையாக அனுப்பவும். 🎙️',
+};
+
+const VOICE_EMPTY: Record<Locale, string> = {
+  en: "I couldn't hear anything clearly in that voice note. Please record again in a quiet spot. 🎙️",
+  hi: 'उस वॉइस नोट में मुझे कुछ साफ़ सुनाई नहीं दिया। कृपया शांत जगह पर दोबारा रिकॉर्ड करें। 🎙️',
+  ta: 'அந்த குரல் செய்தியில் எதுவும் தெளிவாகக் கேட்கவில்லை. அமைதியான இடத்தில் மீண்டும் பதிவு செய்யவும். 🎙️',
+};
+
+// Shown above the answer so the farmer can confirm what we understood from voice.
+function heardLine(locale: Locale, transcript: string): string {
+  const label = locale === 'ta' ? 'நான் கேட்டது' : locale === 'hi' ? 'मैंने सुना' : 'I heard';
+  return `🎙️ _${label}: "${transcript}"_`;
+}
 
 function notRegisteredMessage(): string {
   const url = process.env.NEXT_PUBLIC_APP_URL ?? process.env.APP_URL ?? '';
@@ -118,9 +137,10 @@ async function handleMessage(args: {
   };
   const locale = pickLocale(f.preferred_language);
 
-  // Handle attached media: crop photos go to vision diagnosis; other media
-  // (voice notes, documents) aren't supported yet, so guide the farmer.
+  // Handle attached media: crop photos go to vision diagnosis, voice notes are
+  // transcribed to text; anything else (documents, etc.) we guide the farmer on.
   let image: { buffer: Buffer; type: string; name: string } | null = null;
+  let transcript = '';
   if (mediaUrl) {
     if (mediaType.startsWith('image/')) {
       try {
@@ -128,13 +148,30 @@ async function handleMessage(args: {
       } catch (e) {
         console.error('WhatsApp media download failed:', e);
       }
+    } else if (mediaType.startsWith('audio/')) {
+      // Voice note: download and transcribe. Whisper reads WhatsApp's ogg/opus
+      // directly and takes the farmer's language as a hint (en/hi/ta).
+      try {
+        const audio = await downloadTwilioMedia(mediaUrl);
+        const file = new File([new Uint8Array(audio)], 'voice.ogg', { type: mediaType || 'audio/ogg' });
+        transcript = (await transcribeAudio(file, locale)).trim();
+      } catch (e) {
+        console.error('WhatsApp voice transcription failed:', e);
+        await sendWhatsApp(from, VOICE_FAILED[locale]);
+        return;
+      }
+      if (!transcript) {
+        await sendWhatsApp(from, VOICE_EMPTY[locale]);
+        return;
+      }
+      console.log(`[WhatsApp] transcribed voice from ${farmer.name}: "${transcript.slice(0, 120)}"`);
     } else {
       await sendWhatsApp(from, NON_TEXT_MEDIA[locale]);
       return;
     }
   }
 
-  const message = body || (image
+  const message = transcript || body || (image
     ? (locale === 'ta'
         ? '[பயிர் புகைப்படம்] என் பயிரை பாருங்கள்.'
         : locale === 'hi'
@@ -161,7 +198,9 @@ async function handleMessage(args: {
     const result = await generateChatReply(farmer, { message, locale, history, image, addressByName: true });
     const preview = result.reply.slice(0, 200).replace(/\s+/g, ' ');
     console.log(`[WhatsApp] reply to ${farmer.name} (${farmer.phone}): ${preview}${result.reply.length > 200 ? '…' : ''}`);
-    await sendWhatsApp(from, result.reply);
+    // For voice notes, echo what we understood so the farmer can catch ASR slips.
+    const out = transcript ? `${heardLine(locale, transcript)}\n\n${result.reply}` : result.reply;
+    await sendWhatsApp(from, out);
   } catch (e) {
     console.error('WhatsApp chat engine failed:', e);
     await sendWhatsApp(from, ERROR_REPLY[locale]);
