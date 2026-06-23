@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { putItem, getItem, Tables } from '@/lib/aws/dynamodb';
 import { signToken, type JWTPayload } from '@/lib/auth';
 import { generateId } from '@/lib/utils';
-import { verifyOtp } from '@/lib/otp';
+import { verifyOtp, clearOtp } from '@/lib/otp';
 import { getGovFarmerRecord } from '@/lib/synthetic-gov-data';
 import { toTenDigitPhone } from '@/lib/phone';
 import { mirrorProfileToS3, tryMirror } from '@/lib/farmer-s3-store';
@@ -47,6 +47,8 @@ export async function POST(req: NextRequest) {
     const { farmerId, phone, otp } = RegisterSchema.parse(await req.json());
 
     await verifyOtp(phone, otp);
+    // OTP did its job; drop any stored WhatsApp code so it can't be reused.
+    clearOtp(phone);
 
     // Pull the farmer's details from the (synthetic) government registry.
     const gov = getGovFarmerRecord(farmerId, phone);

@@ -1,8 +1,9 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Sprout, CreditCard, Phone, ShieldCheck, CheckCircle2, MapPin, Maximize, Languages, Landmark, Loader2 } from 'lucide-react';
+import QRCode from 'qrcode';
+import { Sprout, CreditCard, Phone, ShieldCheck, CheckCircle2, MapPin, Maximize, Languages, Landmark, Loader2, MessageCircle } from 'lucide-react';
 import LanguageSwitcher from '@/components/layout/LanguageSwitcher';
 import { toTenDigitPhone } from '@/lib/phone';
 
@@ -19,6 +20,12 @@ interface GovRecord {
   category: string;
 }
 
+interface JoinInfo {
+  link: string;
+  keyword: string;
+  otpChannel: 'mock' | 'whatsapp' | 'sns';
+}
+
 const LANG_LABEL: Record<string, string> = { en: 'English', ta: 'தமிழ்', hi: 'हिन्दी' };
 
 export default function RegisterPage() {
@@ -30,7 +37,11 @@ export default function RegisterPage() {
   const [otp, setOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   const [devCode, setDevCode] = useState('');
+  const [sentNote, setSentNote] = useState('');
   const [record, setRecord] = useState<GovRecord | null>(null);
+
+  const [join, setJoin] = useState<JoinInfo | null>(null);
+  const [qr, setQr] = useState('');
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -38,6 +49,26 @@ export default function RegisterPage() {
   const idValid = /^TN\d{11}$/.test(farmerId.trim().toUpperCase());
   const phoneValid = /^\d{10}$/.test(phone);
   const otpValid = /^\d{6}$/.test(otp);
+
+  // Decide whether to show the WhatsApp join flow, and prep the QR for desktop.
+  useEffect(() => {
+    fetch('/api/auth/whatsapp-join')
+      .then((r) => r.json())
+      .then((d: Partial<JoinInfo>) => {
+        const info: JoinInfo = {
+          link: d.link ?? '',
+          keyword: d.keyword ?? '',
+          otpChannel: (d.otpChannel as JoinInfo['otpChannel']) ?? 'mock',
+        };
+        setJoin(info);
+        if (info.link) {
+          QRCode.toDataURL(info.link, { width: 200, margin: 1 }).then(setQr).catch(() => {});
+        }
+      })
+      .catch(() => setJoin({ link: '', keyword: '', otpChannel: 'mock' }));
+  }, []);
+
+  const useWhatsAppJoin = Boolean(join && join.otpChannel === 'whatsapp' && join.link);
 
   async function sendOtp() {
     setError('');
@@ -52,6 +83,7 @@ export default function RegisterPage() {
       if (!res.ok) { setError(typeof data.error === 'string' ? data.error : 'Could not send OTP'); return; }
       setOtpSent(true);
       setDevCode(typeof data.devCode === 'string' ? data.devCode : '');
+      setSentNote(data.channel === 'whatsapp' ? 'We sent your 6-digit code on WhatsApp. Enter it below.' : '');
     } catch { setError('Could not send OTP'); }
     finally { setBusy(false); }
   }
@@ -122,27 +154,73 @@ export default function RegisterPage() {
             </div>
 
             <label className="mt-4 block text-sm font-medium text-gray-700">Phone number</label>
-            <div className="mt-1 flex gap-2">
-              <div className="relative flex-1">
-                <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                <span className="absolute left-9 top-1/2 -translate-y-1/2 text-sm text-gray-500">+91</span>
-                <input
-                  value={phone}
-                  inputMode="numeric"
-                  onChange={(e) => { setPhone(toTenDigitPhone(e.target.value)); setOtpSent(false); }}
-                  placeholder="10-digit mobile"
-                  className="w-full rounded-xl border border-gray-300 py-3 pl-[4.5rem] pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400"
-                />
-              </div>
-              <button
-                type="button"
-                onClick={sendOtp}
-                disabled={busy || !idValid || !phoneValid}
-                className="shrink-0 rounded-xl border border-brand-300 px-4 text-sm font-semibold text-brand-700 hover:bg-brand-50 disabled:opacity-40"
-              >
-                {otpSent ? 'Resend' : 'Send OTP'}
-              </button>
+            <div className="relative mt-1">
+              <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <span className="absolute left-9 top-1/2 -translate-y-1/2 text-sm text-gray-500">+91</span>
+              <input
+                value={phone}
+                inputMode="numeric"
+                onChange={(e) => { setPhone(toTenDigitPhone(e.target.value)); setOtpSent(false); }}
+                placeholder="10-digit mobile"
+                className="w-full rounded-xl border border-gray-300 py-3 pl-[4.5rem] pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400"
+              />
             </div>
+
+            {idValid && phoneValid && join && (
+              useWhatsAppJoin ? (
+                <div className="mt-5 rounded-2xl border border-brand-100 bg-brand-50/60 p-4">
+                  <div className="flex items-center gap-2 text-brand-700">
+                    <MessageCircle className="h-5 w-5" />
+                    <span className="text-sm font-semibold">Verify on WhatsApp</span>
+                  </div>
+
+                  <div className="mt-3 text-sm text-gray-600">
+                    <p><span className="font-semibold text-gray-800">1.</span> Open WhatsApp and send the ready-made message to join FarmAdvisor.</p>
+                    <a
+                      href={join.link}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-[#25D366] py-2.5 font-semibold text-white hover:brightness-95"
+                    >
+                      <MessageCircle className="h-4 w-4" /> Open WhatsApp to join
+                    </a>
+                    {join.keyword && (
+                      <p className="mt-1 text-center text-xs text-gray-400">Sends &ldquo;join {join.keyword}&rdquo;</p>
+                    )}
+                    {qr && (
+                      <div className="mt-3 flex flex-col items-center">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={qr} alt="Scan to join FarmAdvisor on WhatsApp" className="h-36 w-36 rounded-lg border border-gray-200 bg-white p-1" />
+                        <p className="mt-1 text-xs text-gray-400">On a computer? Scan with your phone.</p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="mt-4 text-sm text-gray-600">
+                    <p><span className="font-semibold text-gray-800">2.</span> Joined? Get your verification code:</p>
+                    <button
+                      type="button"
+                      onClick={sendOtp}
+                      disabled={busy}
+                      className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-brand-300 py-2.5 text-sm font-semibold text-brand-700 hover:bg-brand-50 disabled:opacity-40"
+                    >
+                      {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                      {otpSent ? 'Resend OTP on WhatsApp' : 'Send my OTP'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={sendOtp}
+                  disabled={busy}
+                  className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-brand-300 py-2.5 text-sm font-semibold text-brand-700 hover:bg-brand-50 disabled:opacity-40"
+                >
+                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                  {otpSent ? 'Resend OTP' : 'Send OTP'}
+                </button>
+              )
+            )}
 
             {otpSent && (
               <>
@@ -150,6 +228,9 @@ export default function RegisterPage() {
                   <div className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-700">
                     Demo mode — your OTP is <span className="font-bold">{devCode}</span>
                   </div>
+                )}
+                {sentNote && (
+                  <div className="mt-3 rounded-xl bg-brand-50 px-3 py-2 text-sm text-brand-700">{sentNote}</div>
                 )}
                 <label className="mt-4 block text-sm font-medium text-gray-700">Enter OTP</label>
                 <div className="relative mt-1">

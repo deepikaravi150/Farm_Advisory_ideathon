@@ -35,6 +35,20 @@ export function isTwilioConfigured(): boolean {
   return Boolean(ACCOUNT_SID && AUTH_TOKEN && FROM);
 }
 
+/**
+ * Build the "join the sandbox" deep link used during registration. The link is
+ * the same for every farmer: opening it pre-fills "join <keyword>" in WhatsApp to
+ * the sandbox number, which opts them in. Number comes from TWILIO_WHATSAPP_FROM,
+ * keyword from TWILIO_SANDBOX_KEYWORD (set this to your sandbox's join word).
+ */
+export function getSandboxJoinInfo(): { number: string; keyword: string; link: string } {
+  const number = FROM.replace(/^whatsapp:/, '').replace(/\D/g, ''); // e.g. "14155238886"
+  const keyword = process.env.TWILIO_SANDBOX_KEYWORD ?? '';
+  const text = keyword ? `join ${keyword}` : 'join';
+  const link = number ? `https://wa.me/${number}?text=${encodeURIComponent(text)}` : '';
+  return { number, keyword, link };
+}
+
 function authHeader(): string {
   return 'Basic ' + Buffer.from(`${ACCOUNT_SID}:${AUTH_TOKEN}`).toString('base64');
 }

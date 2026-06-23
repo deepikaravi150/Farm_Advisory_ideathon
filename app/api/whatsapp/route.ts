@@ -102,6 +102,10 @@ export async function POST(req: NextRequest) {
   const phone = toTenDigitPhone(from.replace('whatsapp:', ''));
   if (!from || !phone) return ack();
 
+  // "join <keyword>" is the Twilio sandbox opt-in control phrase (used by our
+  // registration flow). If one reaches us, ignore it rather than replying.
+  if (/^join\b/i.test(body) && !mediaUrl) return ack();
+
   // Acknowledge Twilio right away; do the slow work out-of-band. This is safe on
   // a long-running server (EC2/pm2). On a frozen serverless platform, switch to
   // `import { after } from 'next/server'` and run handleMessage inside after().

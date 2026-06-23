@@ -15,6 +15,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       mock: result.mock,
+      channel: result.channel,
       // devCode is only present in demo/mock mode so the UI can show the code.
       devCode: result.devCode,
       message: result.message,
