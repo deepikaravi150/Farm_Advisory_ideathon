@@ -24,6 +24,11 @@ export const Tables = {
   CROP_PLANS: 'crop_plans',
   SOIL_REPORTS: 'soil_reports',
   GOVERNMENT_SCHEMES: 'government_schemes',
+  // Pest-outbreak geo-alerts.
+  // pest_reports:  PK report_id
+  // pest_alerts:   PK farmer_id, SK pest_key
+  PEST_REPORTS: 'pest_reports',
+  PEST_ALERTS: 'pest_alerts',
 } as const;
 
 export async function putItem(table: string, item: Record<string, unknown>) {

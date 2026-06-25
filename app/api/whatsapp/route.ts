@@ -9,6 +9,7 @@ import {
   downloadTwilioMedia,
   validateTwilioSignature,
 } from '@/lib/whatsapp/twilio';
+import { parsePestResponse, findPendingAlert, respondToPestAlert } from '@/lib/pest-alert';
 
 // The crop-photo / LLM path can take a while; allow the work up to 60s.
 export const maxDuration = 60;
@@ -46,6 +47,18 @@ const VOICE_EMPTY: Record<Locale, string> = {
   hi: 'उस वॉइस नोट में मुझे कुछ साफ़ सुनाई नहीं दिया। कृपया शांत जगह पर दोबारा रिकॉर्ड करें। 🎙️',
   ta: 'அந்த குரல் செய்தியில் எதுவும் தெளிவாகக் கேட்கவில்லை. அமைதியான இடத்தில் மீண்டும் பதிவு செய்யவும். 🎙️',
 };
+
+const PEST_CLEAR_REPLY: Record<Locale, string> = {
+  en: "✅ Thanks — noted your crop is fine. We won't repeat this pest alert. Keep following the prevention tips. 🌱",
+  hi: '✅ धन्यवाद — आपकी फसल ठीक है, यह दर्ज कर लिया। हम यह कीट चेतावनी दोबारा नहीं भेजेंगे। रोकथाम सुझाव अपनाते रहें। 🌱',
+  ta: '✅ நன்றி — உங்கள் பயிர் நலமாக உள்ளது பதிவு செய்யப்பட்டது. இந்த பூச்சி எச்சரிக்கையை மீண்டும் அனுப்ப மாட்டோம். தடுப்பு குறிப்புகளைப் பின்பற்றவும். 🌱',
+};
+
+function pestConfirmReply(locale: Locale, spread: number): string {
+  if (locale === 'ta') return `⚠️ உறுதிப்படுத்தியதற்கு நன்றி. அருகிலுள்ள ${spread} விவசாயிகளுக்கும் சரிபார்க்க அறிவித்துள்ளோம். சிகிச்சையைப் பின்பற்றி பயிரைக் கண்காணிக்கவும். 🌾`;
+  if (locale === 'hi') return `⚠️ पुष्टि के लिए धन्यवाद। हमने पास के ${spread} किसानों को भी जांचने के लिए सूचित किया है। उपचार करें और फसल पर नजर रखें। 🌾`;
+  return `⚠️ Thanks for confirming. We've alerted ${spread} nearby farmer(s) to check too. Follow the treatment steps and keep monitoring your crop. 🌾`;
+}
 
 // Shown above the answer so the farmer can confirm what we understood from voice.
 function heardLine(locale: Locale, transcript: string): string {
@@ -140,6 +153,26 @@ async function handleMessage(args: {
     name: String(f.name ?? 'Farmer'),
   };
   const locale = pickLocale(f.preferred_language);
+
+  // Pest-alert reply: if the farmer has a pending outbreak alert and replies
+  // 1/2 (or yes/no), record the response instead of treating it as a chat turn.
+  if (body && !mediaUrl) {
+    const response = parsePestResponse(body);
+    if (response) {
+      const pending = await findPendingAlert(farmer.farmerId);
+      if (pending) {
+        const result = await respondToPestAlert({
+          farmerId: farmer.farmerId,
+          farmerProfile: f,
+          pestKey: String(pending.pest_key),
+          response,
+        });
+        console.log(`[WhatsApp] pest response '${response}' from ${farmer.name} -> ${String(pending.pest_key)}`);
+        await sendWhatsApp(from, response === 'clear' ? PEST_CLEAR_REPLY[locale] : pestConfirmReply(locale, result.spread ?? 0));
+        return;
+      }
+    }
+  }
 
   // Handle attached media: crop photos go to vision diagnosis, voice notes are
   // transcribed to text; anything else (documents, etc.) we guide the farmer on.

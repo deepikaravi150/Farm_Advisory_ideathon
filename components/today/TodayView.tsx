@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Sparkles, CheckCircle2, Circle, CalendarClock, MessageCircle, Sprout, AlertTriangle, Sun } from 'lucide-react';
 import LanguageSwitcher from '@/components/layout/LanguageSwitcher';
+import PestAlertWidget from '@/components/dashboard/PestAlertWidget';
 import type { TodayPlan } from '@/lib/today-plan';
 
 interface Props {
@@ -77,6 +78,9 @@ export default function TodayView({ base, locale, farmerName, dateLabel }: Props
           </p>
         )}
       </div>
+
+      {/* Pest-outbreak alerts near the farmer (renders nothing when none) */}
+      <PestAlertWidget />
 
       {/* Weather alert — only when bad for the crop */}
       {base.weatherAlert ? (

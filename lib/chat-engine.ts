@@ -18,6 +18,7 @@ import {
   formatDiagnosisForPrompt,
   type Diagnosis,
 } from '@/lib/crop-doctor';
+import { maybeBroadcastFromDiagnosis } from '@/lib/pest-alert';
 
 export type { Message };
 
@@ -144,6 +145,18 @@ export async function generateChatReply(
     }),
     retrieveContext(message),
   ]);
+
+  // Pest outbreak early-warning: if this photo was confirmed as a pest, alert
+  // nearby farmers over WhatsApp (fire-and-forget; never blocks the reply).
+  if (diagnosis) {
+    maybeBroadcastFromDiagnosis({
+      reporterId: farmer.farmerId,
+      reporterProfile: profile,
+      diagnosis,
+      locale,
+      s3Key: cropImageKey,
+    }).catch((e) => console.error('Pest alert trigger failed:', e));
+  }
 
   const languageInstruction =
     locale === 'ta' ? 'Respond in Tamil language.' :
