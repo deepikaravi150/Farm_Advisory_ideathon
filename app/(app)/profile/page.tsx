@@ -1,11 +1,12 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import ProfileCard from '@/components/profile/ProfileCard';
 import FarmerMemorySection from '@/components/profile/FarmerMemorySection';
 import LanguageSwitcher from '@/components/layout/LanguageSwitcher';
-import { Loader2, Landmark, LogOut } from 'lucide-react';
+import { Loader2, Landmark, LogOut, ChevronRight } from 'lucide-react';
 import type { Fact } from '@/lib/memory';
 
 interface Profile {
@@ -18,11 +19,17 @@ interface Profile {
   preferred_language: string;
   created_at: string;
   memory?: Fact[];
+  category?: string;
+  community?: string;
+  gender?: 'male' | 'female' | '';
+  age?: number;
+  annual_income?: number;
 }
 
 export default function ProfilePage() {
   const t = useTranslations('profile');
   const tNav = useTranslations('nav');
+  const tSchemes = useTranslations('schemes');
   const router = useRouter();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -34,9 +41,9 @@ export default function ProfilePage() {
       .finally(() => setLoading(false));
   }, []);
 
-  async function saveProfile(data: Partial<Profile>) {
+  async function saveProfile(data: Record<string, unknown>) {
     await fetch('/api/farmer/profile', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
-    setProfile((prev) => (prev ? { ...prev, ...data } : prev));
+    setProfile((prev) => (prev ? { ...prev, ...(data as Partial<Profile>) } : prev));
   }
 
   async function logout() {
@@ -66,6 +73,21 @@ export default function ProfilePage() {
         </div>
 
         {profile && <ProfileCard profile={profile} onSave={saveProfile} />}
+
+        <Link
+          href="/schemes"
+          className="flex items-center gap-3 rounded-2xl border border-gray-100 bg-white p-4 shadow-sm hover:bg-brand-50"
+        >
+          <div className="flex h-11 w-11 items-center justify-center rounded-full bg-brand-100">
+            <Landmark className="h-5 w-5 text-brand-700" />
+          </div>
+          <div className="flex-1">
+            <p className="font-semibold text-gray-800">{tSchemes('titleShort')}</p>
+            <p className="text-xs text-gray-500">{tSchemes('entryHint')}</p>
+          </div>
+          <ChevronRight className="h-5 w-5 text-gray-300" />
+        </Link>
+
         {profile && <FarmerMemorySection initialFacts={profile.memory ?? []} />}
 
         <button

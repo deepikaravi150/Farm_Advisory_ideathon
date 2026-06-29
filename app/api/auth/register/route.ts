@@ -80,6 +80,10 @@ export async function POST(req: NextRequest) {
       typography: gov.typography,
       land_area_acres: gov.land_area_acres,
       land_picture_s3_key: '',
+      // Land-holding category from the registry (e.g. "Small / Marginal farmer").
+      // Social community / gender / age / income stay blank until the farmer
+      // optionally fills them in, sharpening government-scheme eligibility matching.
+      category: gov.category,
       phone_verified: true,
       phone_verified_at: new Date().toISOString(),
       preferred_language: gov.preferred_language,
