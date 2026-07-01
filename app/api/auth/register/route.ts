@@ -50,22 +50,32 @@ export async function POST(req: NextRequest) {
     // OTP did its job; drop any stored WhatsApp code so it can't be reused.
     clearOtp(phone);
 
-    // Pull the farmer's details from the (synthetic) government registry.
+    // Already in our database? (Seeded, or registered earlier — possibly not in
+    // the synthetic registry.) Log them in instead of failing. The OTP proved they
+    // own this phone; require it to match the stored profile so no one can claim
+    // another farmer's ID.
+    const existing = await getItem(Tables.FARMER_PROFILES, { farmer_id: farmerId });
+    if (existing) {
+      if (toTenDigitPhone(String(existing.phone ?? '')) !== phone) {
+        return NextResponse.json(
+          { error: 'This Farmer ID is registered to a different phone number.' },
+          { status: 403 },
+        );
+      }
+      const lang = typeof existing.preferred_language === 'string' ? existing.preferred_language : 'en';
+      return withSession(
+        { farmerId, phone: String(existing.phone), name: String(existing.name ?? 'Farmer') },
+        lang,
+        { success: true, alreadyRegistered: true, farmerId },
+      );
+    }
+
+    // Brand-new farmer — pull their details from the (synthetic) government registry.
     const gov = getGovFarmerRecord(farmerId, phone);
     if (!gov) {
       return NextResponse.json(
         { error: 'No government record found for this Farmer ID and phone number.' },
         { status: 404 },
-      );
-    }
-
-    // Already onboarded? Just re-issue the session and let them in.
-    const existing = await getItem(Tables.FARMER_PROFILES, { farmer_id: gov.farmer_id });
-    if (existing) {
-      return withSession(
-        { farmerId: gov.farmer_id, phone: gov.phone, name: gov.name },
-        gov.preferred_language,
-        { success: true, alreadyRegistered: true, farmerId: gov.farmer_id },
       );
     }
 
