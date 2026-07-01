@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findFarmersByPhone } from '@/app/api/auth/farmers';
 import { toTenDigitPhone } from '@/lib/phone';
-import { queryItems, Tables } from '@/lib/aws/dynamodb';
+import { queryItems, updateItem, Tables } from '@/lib/aws/dynamodb';
 import { generateChatReply, type Message } from '@/lib/chat-engine';
 import { transcribeAudio } from '@/lib/ai/openai';
 import {
@@ -76,6 +76,23 @@ function notRegisteredMessage(): string {
 function pickLocale(value: unknown): Locale {
   const v = String(value ?? '');
   return v === 'hi' || v === 'ta' ? v : 'en';
+}
+
+// Confirmation when a farmer opts out of the weekly peer-insight tips.
+const OPT_OUT_REPLY: Record<Locale, string> = {
+  en: "✅ Done — you won't get weekly tip messages anymore. You can still ask me anything anytime. 🌱",
+  hi: '✅ हो गया — अब आपको साप्ताहिक सुझाव संदेश नहीं मिलेंगे। आप कभी भी मुझसे कुछ भी पूछ सकते हैं। 🌱',
+  ta: '✅ முடிந்தது — இனி வாராந்திர குறிப்பு செய்திகள் வராது. எப்போது வேண்டுமானாலும் என்னிடம் கேட்கலாம். 🌱',
+};
+
+/** Detect a "stop the tips" message (the opt-out hint we append to insights). */
+function isInsightsOptOut(body: string): boolean {
+  const t = body.trim().toLowerCase();
+  if (!t) return false;
+  if (/^(stop|unsubscribe)\b/.test(t) || t === 'no tips') return true;
+  if (/நிறுத்து|குறிப்பு வேண்டாம்/.test(t)) return true;
+  if (/बंद कर|सुझाव बंद/.test(t)) return true;
+  return false;
 }
 
 /**
@@ -153,6 +170,21 @@ async function handleMessage(args: {
     name: String(f.name ?? 'Farmer'),
   };
   const locale = pickLocale(f.preferred_language);
+
+  // Opt-out: a farmer replying "STOP" to a weekly tip is unsubscribed from the
+  // peer-insight push (their other chat still works). Note: Twilio may also
+  // intercept "stop" at the platform level on a production number.
+  if (body && !mediaUrl && isInsightsOptOut(body)) {
+    await updateItem({
+      TableName: Tables.FARMER_PROFILES,
+      Key: { farmer_id: farmer.farmerId },
+      UpdateExpression: 'SET peer_insights_opt_out = :v',
+      ExpressionAttributeValues: { ':v': true },
+    });
+    console.log(`[WhatsApp] ${farmer.name} opted out of peer-insight tips`);
+    await sendWhatsApp(from, OPT_OUT_REPLY[locale]);
+    return;
+  }
 
   // Pest-alert reply: if the farmer has a pending outbreak alert and replies
   // 1/2 (or yes/no), record the response instead of treating it as a chat turn.

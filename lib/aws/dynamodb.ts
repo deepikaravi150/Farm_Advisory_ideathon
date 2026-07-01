@@ -29,6 +29,9 @@ export const Tables = {
   // pest_alerts:   PK farmer_id, SK pest_key
   PEST_REPORTS: 'pest_reports',
   PEST_ALERTS: 'pest_alerts',
+  // Peer-insight dedupe/rotation.
+  // peer_insights: PK farmer_id, SK insight_key
+  PEER_INSIGHTS: 'peer_insights',
 } as const;
 
 export async function putItem(table: string, item: Record<string, unknown>) {
