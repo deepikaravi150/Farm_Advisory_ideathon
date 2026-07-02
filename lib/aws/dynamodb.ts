@@ -32,6 +32,9 @@ export const Tables = {
   // Peer-insight dedupe/rotation.
   // peer_insights: PK farmer_id, SK insight_key
   PEER_INSIGHTS: 'peer_insights',
+  // Farmer financial ledger (expenses / crop sales / loans).
+  // financial_entries: PK farmer_id, SK entry_id
+  FINANCIAL_ENTRIES: 'financial_entries',
 } as const;
 
 export async function putItem(table: string, item: Record<string, unknown>) {
