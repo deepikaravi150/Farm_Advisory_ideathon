@@ -40,7 +40,7 @@ This README is the single source of documentation for the project.
 | 🌱 **Smart crop planning** | A complete, dated, weather-aware season plan tailored to your land, with stage costs and budget. |
 | ☀️ **"Today"** | A one-screen, tappable checklist of what to do today, from your plan + weather + soil. |
 | 🧪 **Soil health** | Upload a Soil Health Card (photo/PDF) → AI extracts pH/N-P-K and gives plain-language advice. |
-| 💰 **Market & money** | Live mandi prices (Agmarknet) + a profit outlook from your plan's costs. |
+| 💰 **Money & finances** | Live mandi prices + plan-based profit outlook, **plus a personal ledger** — log real expenses, crop sales & loans for profit/loss, expense breakdown, above/below-market (anti-scam) checks, and loan-vs-spend tracking. |
 | 🏛️ **Government schemes** | 71 TN + Central schemes matched to your profile, tagged Eligible / Likely / Check. |
 | 🐛 **Pest geo-alerts** | A confirmed pest photo warns nearby farmers (within ~3 km) over WhatsApp. |
 | 👥 **Peer insights** | A weekly anonymized "a farmer like you did X" WhatsApp nudge from similar farmers. |
@@ -101,9 +101,18 @@ Each plan has dated **milestones** (land prep → seed → sowing → irrigation
 ### 🧪 Soil health
 `/api/soil/upload` reads a Soil Health Card (image *or* PDF via `pdf-parse`), extracts **pH, N-P-K, organic carbon, EC, micronutrients**, and stores a plain-language summary + recommendations. Soil data then powers crop suitability, planning, and chat.
 
-### 💰 Market & money
-- `/api/market-prices` pulls **live mandi prices** from Agmarknet / data.gov.in (min, max, modal, up/down/flat trend).
-- `/api/money` computes a **profit outlook** by combining the active plan's costs with the current modal price (LLM + deterministic fallback). Explicitly labelled an estimate — no realized outcomes are stored.
+### 💰 Money & finances
+The **Money** tab has four sections — **Overview · Expenses · Sales · Loans**.
+
+- **Live market price** — `/api/market-prices` pulls mandi prices from Agmarknet / data.gov.in (min, max, modal, up/down/flat trend).
+- **Plan-based profit outlook** — `/api/money` estimates revenue/profit from the active plan's costs × current modal price (LLM + deterministic fallback). Labelled an estimate.
+- **Financial ledger (real money)** — `lib/money/` + the `financial_entries` table let a farmer record actual **expenses, crop sales, and loans**:
+  - `lib/money/ledger.ts` — CRUD, shared by the API and the WhatsApp path.
+  - `lib/money/analysis.ts` — deterministic **profit/loss**, **expense-by-category** breakdown, **per-crop P&L**, an **above/below-market "scam" check** (each sale's ₹/qtl vs the market rate snapshotted at sale time, flagging under-market sales, estimated loss, and buyers who repeatedly underpay), and **loan-vs-spend** (flags when total spending crosses total loans) — plus a short **localized AI narrative** with a deterministic fallback. `buildFinancialPromptContext()` feeds a compact summary into the chat engine so "am I in profit?" / "how much on fertilizer?" answer from real figures on web **and** WhatsApp.
+  - **WhatsApp / voice quick-add** — `lib/money/whatsapp-log.ts` parses messages like *"spent 2000 on fertilizer"* or *"sold 5 quintal paddy at 2100"* into entries (a keyword gate avoids an LLM call on every message; questions fall through to chat).
+  - APIs: `GET/POST/PATCH/DELETE /api/money/ledger`, `GET /api/money/analysis`.
+
+No realized outcomes are invented — analysis is grounded in what the farmer actually logs.
 
 ### 🏛️ Government schemes
 A structured, queryable catalogue of **71 schemes** (48 TN State + 23 Central) in `lib/data/tn-schemes.json`, each with human-readable content **plus** structured `criteria` (district, crop, land-size class, community, gender, age, income, occupation).
@@ -180,6 +189,7 @@ Tables are defined in `lib/aws/dynamodb.ts` (`Tables` enum). DynamoDB is schemal
 | `pest_reports` | PK `report_id` | Confirmed outbreak points |
 | `pest_alerts` | PK `farmer_id`, SK `pest_key` | Per-recipient alert state + cooldown |
 | `peer_insights` | PK `farmer_id`, SK `insight_key` | Peer-insight send log + cooldown |
+| `financial_entries` | PK `farmer_id`, SK `entry_id` | Ledger rows: expenses, crop sales, loans |
 
 > Note: `scanItems()` reads a single (~1 MB) page — fine for demo scale; add pagination before large-scale use.
 
@@ -202,6 +212,7 @@ lib/
   aws/     dynamodb.ts, s3.ts, sns.ts, polly.ts, transcribe.ts
   schemes/ types, store, match, facts, format, chat-context
   insights/ peer-insights.ts, store.ts        # peer-insight engine
+  money/   ledger.ts, analysis.ts, whatsapp-log.ts, types.ts  # financial ledger
   whatsapp/ twilio.ts
   crop-info.ts, crop-suitability.ts, crop-plan-weather.ts,
   daily-sms.ts, today-plan.ts, weather.ts, memory.ts,
@@ -237,7 +248,9 @@ All routes are App-Router handlers under `app/api/`. Auth-gated routes require t
 
 **Data**
 - `GET /api/soil` · `POST /api/soil/upload` — soil report read / upload+parse.
-- `GET /api/money` — profit outlook · `GET /api/market-prices` — Agmarknet prices.
+- `GET /api/money` — plan-based profit outlook · `GET /api/market-prices` — Agmarknet prices.
+- `GET/POST/PATCH/DELETE /api/money/ledger` — financial ledger (expenses/sales/loans).
+- `GET /api/money/analysis` — profit/loss, breakdowns, market & loan checks + AI narrative (`?locale=`).
 - `GET /api/weather` — forecast for the field.
 - `GET /api/schemes` — full scheme catalogue.
 
@@ -294,10 +307,12 @@ npm install
 # 2. Configure
 cp .env.example .env.local      # then fill in real values
 
-# 3. Create the DynamoDB helper tables (pest + peer-insight)
+# 3. Create the DynamoDB helper tables (pest + peer-insight + financial ledger)
 npx tsx scripts/setup-pest-tables.ts
 npx tsx scripts/setup-peer-insights-table.ts
-#   (farmer_profiles / crop_plans / soil_reports are created out-of-band)
+npx tsx scripts/setup-financial-table.ts
+#   (needs admin AWS creds — the app IAM user can't create tables;
+#    farmer_profiles / crop_plans / soil_reports are created out-of-band)
 
 # 4. (Optional) Ingest the knowledge base into Qdrant for RAG
 npm run ingest
@@ -324,12 +339,14 @@ docker compose up --build       # web app :3000, Qdrant :6333 — reads .env
 | `npm run ingest` | Ingest KB docs into Qdrant (`scripts/ingest-kb.ts`) |
 | `npx tsx scripts/setup-pest-tables.ts` | Create `pest_reports` + `pest_alerts` |
 | `npx tsx scripts/setup-peer-insights-table.ts` | Create `peer_insights` |
+| `npx tsx scripts/setup-financial-table.ts` | Create `financial_entries` (needs admin creds) |
 | `npx tsx scripts/crawl-tn-farmer-schemes.mjs` | Crawl myScheme → raw scheme data |
 | `npx tsx scripts/extract-scheme-criteria.mjs` | LLM-extract structured criteria → `lib/data/tn-schemes.json` |
 | `npx tsx scripts/seed-sample-profile-fields.ts [--apply]` | Backfill sample profile fields (demo) |
 | `npx tsx scripts/seed-demo-neighbour.ts` | Seed a nearby farmer for the pest-alert demo |
 | `npx tsx scripts/export-farmers-xlsx.ts [out.xlsx]` | Export `farmer_profiles` to Excel |
 | `npx tsx scripts/test-peer-insights.ts` | Offline dry-run of the peer-insight engine |
+| `npx tsx scripts/test-financial.ts [farmerId]` | Offline end-to-end ledger + analysis test |
 | `npx tsx scripts/test-pest-engine.ts` / `test-pest-tables.ts` | Pest-alert tests |
 | `npx tsx scripts/check-whatsapp.ts` | Verify Twilio/WhatsApp config |
 
@@ -344,11 +361,14 @@ docker compose up --build       # web app :3000, Qdrant :6333 — reads .env
 ```bash
 git fetch origin && git reset --hard origin/<branch>
 pm2 stop farm-advisor          # frees RAM (small box → build OOM risk)
+export NODE_OPTIONS=--max-old-space-size=2048   # raise V8 heap or the build OOMs on ~1GB RAM
 npm run build
 cp -r .next/static  .next/standalone/.next/static
 cp -r public        .next/standalone/public
 pm2 restart farm-advisor
 ```
+
+> **Build OOM:** on the ~1 GB box `npm run build` dies with "JavaScript heap out of memory" unless `NODE_OPTIONS=--max-old-space-size=2048` is set (V8 caps its heap from RAM; the box's swap doesn't raise that ceiling). Have the deploy script restart the *previous* build if the new build fails, so a failed build never leaves the app down. Note Next's build also type-checks `scripts/**`.
 
 **Runtime env:** the standalone server reads `.next/standalone/.env`, not the repo-root `.env`. `npm run build` copies repo-root `.env` into the standalone dir, so set env **before** building (or `cp .env .next/standalone/.env` + `pm2 restart` for non-`NEXT_PUBLIC_*` changes). `NEXT_PUBLIC_*` vars are baked at build time.
 
