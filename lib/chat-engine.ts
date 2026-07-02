@@ -20,6 +20,8 @@ import {
 } from '@/lib/crop-doctor';
 import { maybeBroadcastFromDiagnosis } from '@/lib/pest-alert';
 import { buildSchemesPromptContext } from '@/lib/schemes/chat-context';
+import { listEntries } from '@/lib/money/ledger';
+import { buildFinancialPromptContext } from '@/lib/money/analysis';
 
 export type { Message };
 
@@ -119,7 +121,7 @@ export async function generateChatReply(
   }
 
   // Gather context (DynamoDB profile/history + RAG over the S3 knowledge base)
-  const [profile, soilReports, cropPlans, recentChats, kbContext] = await Promise.all([
+  const [profile, soilReports, cropPlans, recentChats, kbContext, ledgerEntries] = await Promise.all([
     getItem(Tables.FARMER_PROFILES, { farmer_id: farmer.farmerId }),
     queryItems({
       TableName: Tables.SOIL_REPORTS,
@@ -145,6 +147,7 @@ export async function generateChatReply(
       Limit: 2,
     }),
     retrieveContext(message),
+    listEntries(farmer.farmerId).catch(() => []),
   ]);
 
   // Pest outbreak early-warning: if this photo was confirmed as a pest, alert
@@ -170,6 +173,9 @@ export async function generateChatReply(
   // their profile + crop) — lets the advisor answer subsidy/scheme questions
   // from real data. Shared by web chat and WhatsApp via this engine.
   const schemesContext = buildSchemesPromptContext(profile, cropPlans);
+  // Real recorded finances (expenses/sales/loans) so the advisor answers money
+  // questions from actual figures, not estimates. Shared by web + WhatsApp.
+  const financialContext = buildFinancialPromptContext(ledgerEntries as Parameters<typeof buildFinancialPromptContext>[0]);
   const contextSummaries = recentChats.map((c) => c.summary).filter(Boolean).join('\n');
   const memoryContext = formatMemoryForPrompt(profile?.memory as Fact[] | undefined);
 
@@ -230,6 +236,8 @@ ${contextSummaries ? `Recent conversation context:\n${contextSummaries}` : ''}
 ${kbContext ? `Reference knowledge (from the farming knowledge base — prefer this over general knowledge and cite the source when you use it):\n${kbContext}` : ''}
 
 ${schemesContext ? `Government schemes this farmer likely qualifies for:\n${schemesContext}\n(When the farmer asks about subsidies, schemes, loans, insurance, financial help, pensions, or money for seeds/inputs/equipment, recommend ONLY from this list. For each, give the benefit, who to apply to / how to apply, the key documents, and the source link. Mention any "To confirm" conditions. Always remind them to verify on the official page before applying. Do NOT invent schemes, amounts, or eligibility.)` : ''}
+
+${financialContext ? `Farmer's recorded finances (from their money ledger):\n${financialContext}\n(Use these REAL figures when the farmer asks about spending, income, profit or loss, whether they sold above/below the market rate, or their loans. Quote the actual numbers; do not invent figures, and if something isn't recorded, say it isn't logged yet.)` : ''}
 
 ${mode === 'checkin' ? `CHECK-IN MODE: This is the farmer's daily field check-in. Treat the conversation as a quick status update on their current crop and stage. Acknowledge what they report, ask one short, relevant follow-up about crop condition, pests/disease, water, or growth at the CURRENT stage, and give the single most useful next action. Keep it warm and brief.\n` : ''}
 ${addressByNameInstruction}${languageInstruction}

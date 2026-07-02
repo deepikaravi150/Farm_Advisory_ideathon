@@ -10,6 +10,9 @@ import {
   validateTwilioSignature,
 } from '@/lib/whatsapp/twilio';
 import { parsePestResponse, findPendingAlert, respondToPestAlert } from '@/lib/pest-alert';
+import { looksFinancial, parseFinancialMessage } from '@/lib/money/whatsapp-log';
+import { createEntry, listEntries, summarize } from '@/lib/money/ledger';
+import type { FinancialEntry } from '@/lib/money/types';
 
 // The crop-photo / LLM path can take a while; allow the work up to 60s.
 export const maxDuration = 60;
@@ -64,6 +67,29 @@ function pestConfirmReply(locale: Locale, spread: number): string {
 function heardLine(locale: Locale, transcript: string): string {
   const label = locale === 'ta' ? 'நான் கேட்டது' : locale === 'hi' ? 'मैंने सुना' : 'I heard';
   return `🎙️ _${label}: "${transcript}"_`;
+}
+
+// Confirmation shown after a farmer logs money via WhatsApp/voice.
+function financialLogReply(
+  locale: Locale,
+  entry: FinancialEntry,
+  totals: { totalExpenses: number; totalRevenue: number; totalLoans: number },
+): string {
+  const inr = (n: number) => `₹${Math.round(n).toLocaleString('en-IN')}`;
+  if (entry.type === 'expense') {
+    if (locale === 'ta') return `✅ செலவு பதிவு: ${inr(entry.amount)} (${entry.category}). மொத்த செலவு: ${inr(totals.totalExpenses)}.`;
+    if (locale === 'hi') return `✅ खर्च दर्ज: ${inr(entry.amount)} (${entry.category})। कुल खर्च: ${inr(totals.totalExpenses)}।`;
+    return `✅ Expense logged: ${inr(entry.amount)} (${entry.category}). Total spend so far: ${inr(totals.totalExpenses)}.`;
+  }
+  if (entry.type === 'sale') {
+    const line = `${entry.quantity} ${entry.unit} ${entry.crop} @ ${inr(entry.price_per_unit)}/${entry.unit} = ${inr(entry.amount)}`;
+    if (locale === 'ta') return `✅ விற்பனை பதிவு: ${line}. மொத்த வருமானம்: ${inr(totals.totalRevenue)}.`;
+    if (locale === 'hi') return `✅ बिक्री दर्ज: ${line}. कुल आय: ${inr(totals.totalRevenue)}।`;
+    return `✅ Sale logged: ${line}. Total earned: ${inr(totals.totalRevenue)}.`;
+  }
+  if (locale === 'ta') return `✅ கடன் பதிவு: ${inr(entry.amount)} (${entry.lender}). மொத்த கடன்: ${inr(totals.totalLoans)}.`;
+  if (locale === 'hi') return `✅ कर्ज दर्ज: ${inr(entry.amount)} (${entry.lender})। कुल कर्ज: ${inr(totals.totalLoans)}।`;
+  return `✅ Loan logged: ${inr(entry.amount)} (${entry.lender}). Total loans: ${inr(totals.totalLoans)}.`;
 }
 
 function notRegisteredMessage(): string {
@@ -248,6 +274,26 @@ async function handleMessage(args: {
           : '[crop photo] Please check my crop.')
     : '');
   if (!message && !image) return;
+
+  // Money quick-log: "spent 2000 on fertilizer" / "sold 5 quintal paddy at 2100".
+  // Voice notes arrive here as `transcript`. Text-only (not crop photos); a question
+  // like "how much did I spend?" returns null and falls through to the chat engine.
+  if (!image && message && looksFinancial(message)) {
+    const draft = await parseFinancialMessage(message, locale).catch(() => null);
+    if (draft) {
+      try {
+        const entry = await createEntry(farmer.farmerId, draft);
+        const totals = summarize(await listEntries(farmer.farmerId));
+        console.log(`[WhatsApp] logged ${entry.type} ₹${entry.amount} for ${farmer.name}`);
+        const confirm = financialLogReply(locale, entry, totals);
+        await sendWhatsApp(from, transcript ? `${heardLine(locale, transcript)}\n\n${confirm}` : confirm);
+        return;
+      } catch (e) {
+        console.error('WhatsApp money quick-log failed:', e);
+        // fall through to the normal chat reply
+      }
+    }
+  }
 
   // Short-term context: replay the last few stored turns so the bot follows the
   // thread. Long-term continuity comes from the engine's summaries + memory.
