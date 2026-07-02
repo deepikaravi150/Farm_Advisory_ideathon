@@ -8,6 +8,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { scanItems, Tables } from '../lib/aws/dynamodb';
 import { createEntry, listEntries, deleteEntry } from '../lib/money/ledger';
 import { computeDeterministic, fallbackNarrative } from '../lib/money/analysis';
+import type { FinancialEntry } from '../lib/money/types';
 
 function loadEnvLocal() {
   for (const f of ['.env.local', '.env']) {
@@ -32,7 +33,7 @@ async function main() {
   if (!farmerId) { console.error('No farmer id available.'); process.exit(1); }
   console.log(`Testing financial ledger for ${farmerId}\n`);
 
-  const created = [];
+  const created: FinancialEntry[] = [];
   created.push(await createEntry(farmerId, { type: 'expense', amount: 4000, category: 'fertilizer', crop: 'Paddy' }));
   created.push(await createEntry(farmerId, { type: 'expense', amount: 2500, category: 'labour', crop: 'Paddy' }));
   // Sale below the market rate (2100 vs 2400) → underselling flag.
