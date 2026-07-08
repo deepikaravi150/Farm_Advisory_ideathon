@@ -1,11 +1,10 @@
 import {
   chatWithBedrock,
-  summarizeText,
-  extractFarmingContextTags,
-  extractFarmerFacts,
+  extractConversationMeta,
   extractTextFromDocument,
   type Message,
 } from '@/lib/ai/openai';
+import { routeContext } from '@/lib/chat/context-router';
 import { retrieveContext } from '@/lib/ai/rag';
 import { queryItems, putItem, getItem, updateItem, Tables } from '@/lib/aws/dynamodb';
 import { generateId, extractCentroid } from '@/lib/utils';
@@ -120,7 +119,13 @@ export async function generateChatReply(
     }
   }
 
-  // Gather context (DynamoDB profile/history + RAG over the S3 knowledge base)
+  // Route: decide which heavy context blocks this message actually needs, so we
+  // don't stuff (and pay for) schemes/RAG/weather/finances on every turn. A crop
+  // photo forces the agronomy blocks on.
+  const route = routeContext(message, { mode, hasImage: Boolean(image && image.buffer.length > 0) });
+
+  // Gather context (DynamoDB profile/history + RAG over the S3 knowledge base).
+  // RAG (embedding call) and the ledger load are skipped when not routed.
   const [profile, soilReports, cropPlans, recentChats, kbContext, ledgerEntries] = await Promise.all([
     getItem(Tables.FARMER_PROFILES, { farmer_id: farmer.farmerId }),
     queryItems({
@@ -146,8 +151,8 @@ export async function generateChatReply(
       // window of summaries for in-flight topic continuity.
       Limit: 2,
     }),
-    retrieveContext(message),
-    listEntries(farmer.farmerId).catch(() => []),
+    route.rag ? retrieveContext(message) : Promise.resolve(''),
+    route.financial ? listEntries(farmer.farmerId).catch(() => []) : Promise.resolve([] as Awaited<ReturnType<typeof listEntries>>),
   ]);
 
   // Pest outbreak early-warning: if this photo was confirmed as a pest, alert
@@ -169,13 +174,14 @@ export async function generateChatReply(
 
   const soilData = soilReports[0];
   const cropPlan = cropPlans[0];
+  const soilBlock = route.soil ? formatSoilReportContext(soilData) : '';
   // Government schemes the farmer likely qualifies for (deterministic match on
-  // their profile + crop) — lets the advisor answer subsidy/scheme questions
-  // from real data. Shared by web chat and WhatsApp via this engine.
-  const schemesContext = buildSchemesPromptContext(profile, cropPlans);
-  // Real recorded finances (expenses/sales/loans) so the advisor answers money
-  // questions from actual figures, not estimates. Shared by web + WhatsApp.
-  const financialContext = buildFinancialPromptContext(ledgerEntries as Parameters<typeof buildFinancialPromptContext>[0]);
+  // their profile + crop) — only when the message is about subsidies/schemes.
+  const schemesContext = route.schemes ? buildSchemesPromptContext(profile, cropPlans) : '';
+  // Real recorded finances (expenses/sales/loans) — only for money questions.
+  const financialContext = route.financial
+    ? buildFinancialPromptContext(ledgerEntries as Parameters<typeof buildFinancialPromptContext>[0])
+    : '';
   const contextSummaries = recentChats.map((c) => c.summary).filter(Boolean).join('\n');
   const memoryContext = formatMemoryForPrompt(profile?.memory as Fact[] | undefined);
 
@@ -186,10 +192,10 @@ export async function generateChatReply(
     ? `Address the farmer personally by their name, ${firstName}. Open your reply with a short, warm greeting using their name (and only their name from this profile). Use it naturally — don't repeat it in every line.\n`
     : '';
 
-  // Live weather for the farmer's saved land centroid.
-  // Kept best-effort so chat still works if the weather API is unavailable.
+  // Live weather for the farmer's saved land centroid — only for weather-sensitive
+  // questions (also skips the weather API call otherwise). Best-effort.
   let weatherContext = '';
-  try {
+  if (route.weather) try {
     const coords = profile?.land_coordinates as Array<{ lat: number; lng: number }> | undefined;
     if (coords?.length) {
       const { lat, lng } = extractCentroid(coords);
@@ -223,7 +229,7 @@ Farmer Profile:
 - Region: Tamil Nadu, India
 
 ${memoryContext ? `${memoryContext}\n(Treat these as known facts about THIS farmer; use them and do not re-ask what is already known.)\n` : ''}
-${formatSoilReportContext(soilData)}
+${soilBlock}
 
 ${cropPlan ? `Current Crop Plan: ${cropPlan.crop_name}, Status: ${cropPlan.status}, Stage: ${cropPlan.current_stage ?? 'unknown'}` : 'No active crop plan.'}
 
@@ -265,11 +271,9 @@ Response rules:
   const savedChatId = chatId ?? generateId();
   const savedTimestamp = chatTimestamp ?? new Date().toISOString();
 
-  Promise.all([
-    summarizeText(conversationText),
-    extractFarmingContextTags(conversationText),
-    extractFarmerFacts(conversationText, existingFacts),
-  ]).then(([summary, tags, mergedFacts]) => {
+  // Store the turn (+ summary/tags) and update long-term memory. All of it is
+  // fire-and-forget so it never delays the reply.
+  const persistTurn = (summary: string, tags: string[], mergedFacts: Fact[]) => {
     if (chatId && chatTimestamp) {
       updateItem({
         TableName: Tables.CHAT_HISTORY,
@@ -302,7 +306,18 @@ Response rules:
         ExpressionAttributeValues: { ':m': mergedFacts },
       }).catch(console.error);
     }
-  }).catch(console.error);
+  };
+
+  if (route.minimal) {
+    // Trivial greeting/ack: store it for continuity but skip the housekeeping LLM
+    // call (one summary+tags+facts call saved on every such message).
+    persistTurn('', [], existingFacts);
+  } else {
+    // One batched call for summary + tags + merged memory (was three calls).
+    extractConversationMeta(conversationText, existingFacts)
+      .then(({ summary, tags, facts }) => persistTurn(summary, tags, facts))
+      .catch(console.error);
+  }
 
   return { reply, locale, diagnosis, s3Key: cropImageKey, chatId: savedChatId, timestamp: savedTimestamp };
 }
