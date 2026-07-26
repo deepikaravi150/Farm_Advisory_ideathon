@@ -24,6 +24,20 @@ export const Tables = {
   CROP_PLANS: 'crop_plans',
   SOIL_REPORTS: 'soil_reports',
   GOVERNMENT_SCHEMES: 'government_schemes',
+  // Pest-outbreak geo-alerts.
+  // pest_reports:  PK report_id
+  // pest_alerts:   PK farmer_id, SK pest_key
+  PEST_REPORTS: 'pest_reports',
+  PEST_ALERTS: 'pest_alerts',
+  // Peer-insight dedupe/rotation.
+  // peer_insights: PK farmer_id, SK insight_key
+  PEER_INSIGHTS: 'peer_insights',
+  // Farmer financial ledger (expenses / crop sales / loans).
+  // financial_entries: PK farmer_id, SK entry_id
+  FINANCIAL_ENTRIES: 'financial_entries',
+  // Shared cache of translated market/commodity/place names (data.gov.in Agmarknet
+  // data is English-only at the source). PK text_key = "<en text>#<locale>".
+  MARKET_I18N: 'market_i18n',
 } as const;
 
 export async function putItem(table: string, item: Record<string, unknown>) {

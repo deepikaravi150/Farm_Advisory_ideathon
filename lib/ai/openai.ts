@@ -216,27 +216,80 @@ Rules:
       ],
     });
     const parsed = JSON.parse(res.choices[0]?.message?.content ?? '{}');
-    const raw = Array.isArray(parsed.facts) ? parsed.facts : null;
-    if (!raw) return existingFacts;
-
-    const now = new Date().toISOString();
-    const merged: Fact[] = raw
-      .filter((f: unknown): f is { id?: unknown; text?: unknown; category?: unknown } => !!f && typeof f === 'object')
-      .map((f: { id?: unknown; text?: unknown; category?: unknown }) => {
-        const text = typeof f.text === 'string' ? f.text.trim() : '';
-        const id = typeof f.id === 'string' && f.id && f.id !== 'NEW' ? f.id : generateId();
-        const category = isMemoryCategory(f.category) ? f.category : 'other';
-        const prior = existingFacts.find((e) => e.id === id);
-        // Keep the original timestamp when the fact text is unchanged.
-        const updatedAt = prior && prior.text === text ? prior.updatedAt : now;
-        return { id, text, category, updatedAt };
-      })
-      .filter((f: Fact) => f.text);
-
-    return capFacts(merged);
+    return mergeFacts(parsed.facts, existingFacts);
   } catch (err) {
     console.error('extractFarmerFacts failed:', err);
     return existingFacts;
+  }
+}
+
+/** Merge LLM-proposed facts into the existing list (dedup by id, cap size). */
+function mergeFacts(raw: unknown, existingFacts: Fact[]): Fact[] {
+  const arr = Array.isArray(raw) ? raw : null;
+  if (!arr) return existingFacts;
+  const now = new Date().toISOString();
+  const merged: Fact[] = arr
+    .filter((f: unknown): f is { id?: unknown; text?: unknown; category?: unknown } => !!f && typeof f === 'object')
+    .map((f: { id?: unknown; text?: unknown; category?: unknown }) => {
+      const text = typeof f.text === 'string' ? f.text.trim() : '';
+      const id = typeof f.id === 'string' && f.id && f.id !== 'NEW' ? f.id : generateId();
+      const category = isMemoryCategory(f.category) ? f.category : 'other';
+      const prior = existingFacts.find((e) => e.id === id);
+      const updatedAt = prior && prior.text === text ? prior.updatedAt : now;
+      return { id, text, category, updatedAt };
+    })
+    .filter((f: Fact) => f.text);
+  return capFacts(merged);
+}
+
+/**
+ * Post-turn housekeeping in ONE LLM call: conversation summary + context tags +
+ * merged long-term facts. Replaces three separate calls (summarize / tag / facts)
+ * to cut background token usage per message. Never throws — returns safe defaults.
+ */
+export async function extractConversationMeta(
+  conversationText: string,
+  existingFacts: Fact[],
+): Promise<{ summary: string; tags: string[]; facts: Fact[] }> {
+  try {
+    const existingForPrompt = existingFacts.map((f) => ({ id: f.id, text: f.text, category: f.category }));
+    const res = await client.chat.completions.create({
+      model: chatModel,
+      max_completion_tokens: 1200,
+      response_format: { type: 'json_object' },
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You process a farmer consultation: summarize it, tag it, and maintain a long-term memory of durable facts about the farmer. Return ONLY valid JSON.',
+        },
+        {
+          role: 'user',
+          content: `Conversation:
+${conversationText}
+
+Existing durable facts (JSON):
+${JSON.stringify(existingForPrompt)}
+
+Return JSON of exactly this shape:
+{
+  "summary": "2-3 sentence summary focused on agronomic decisions and crop info",
+  "tags": ["short","farming","tags"],
+  "facts": [{"id":"<existing id, or NEW>","text":"one concise English sentence","category":"crop|land|irrigation|soil|pest|preference|other"}]
+}
+Facts rules: keep ONLY durable facts (crops/plots grown, land details, irrigation source/method, soil observations, pest/disease history, lasting preferences). IGNORE greetings, small talk, one-off weather, and anything already captured. If new info updates/contradicts an existing fact, REUSE its id; use "NEW" for genuinely new facts. Keep at most 40; drop the least useful if over.`,
+        },
+      ],
+    });
+    const parsed = JSON.parse(res.choices[0]?.message?.content ?? '{}');
+    return {
+      summary: typeof parsed.summary === 'string' ? parsed.summary : '',
+      tags: Array.isArray(parsed.tags) ? parsed.tags.map(String) : [],
+      facts: mergeFacts(parsed.facts, existingFacts),
+    };
+  } catch (err) {
+    console.error('extractConversationMeta failed:', err);
+    return { summary: '', tags: [], facts: existingFacts };
   }
 }
 

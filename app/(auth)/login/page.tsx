@@ -1,96 +1,158 @@
 'use client';
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { useLocale, useTranslations } from 'next-intl';
-import { Sprout, Phone, Lock, Loader2, AlertCircle, Eye, EyeOff } from 'lucide-react';
+import { useLocale } from 'next-intl';
+import { Sprout, Phone, ShieldCheck, Loader2, AlertCircle } from 'lucide-react';
 import LanguageSwitcher from '@/components/layout/LanguageSwitcher';
 import { toTenDigitPhone } from '@/lib/phone';
 
 export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
+  );
+}
+
+function LoginForm() {
   const router = useRouter();
-  const t = useTranslations('login');
-  const tc = useTranslations('common');
+  const searchParams = useSearchParams();
   const locale = useLocale();
   const [phone, setPhone] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [otp, setOtp] = useState('');
+  const [otpSent, setOtpSent] = useState(false);
+  const [devCode, setDevCode] = useState('');
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const notice = searchParams.get('notice') === 'exists'
+    ? 'This Farmer ID is already registered. Please login with your phone number.'
+    : '';
 
-  async function handleLogin(e: React.FormEvent) {
-    e.preventDefault();
+  const phoneValid = /^\d{10}$/.test(phone);
+  const otpValid = /^\d{6}$/.test(otp);
+
+  async function sendOtp() {
     setError('');
-    setLoading(true);
+    setBusy(true);
+    try {
+      const res = await fetch('/api/auth/otp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(typeof data.error === 'string' ? data.error : 'Could not send OTP'); return; }
+      setOtpSent(true);
+      setDevCode(typeof data.devCode === 'string' ? data.devCode : '');
+    } catch { setError('Could not send OTP'); }
+    finally { setBusy(false); }
+  }
+
+  async function login() {
+    setError('');
+    setBusy(true);
     try {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone, password, locale }),
+        body: JSON.stringify({ phone, otp, locale }),
       });
       const data = await res.json();
-      if (!res.ok) { setError(data.error ?? t('failed')); return; }
-      router.push('/dashboard');
-    } catch { setError(tc('networkError')); }
-    finally { setLoading(false); }
+      if (!res.ok) { setError(typeof data.error === 'string' ? data.error : 'Login failed'); return; }
+      router.push('/today');
+      router.refresh();
+    } catch { setError('Network error. Please try again.'); }
+    finally { setBusy(false); }
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-brand-50 to-earth-50 flex items-center justify-center p-4">
-      <div className="absolute right-4 top-4">
-        <LanguageSwitcher />
-      </div>
-      <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md">
-        <div className="flex items-center gap-2 justify-center mb-6">
-          <Sprout className="w-8 h-8 text-brand-600" />
-          <span className="text-2xl font-bold text-brand-700">FarmAdvisor</span>
+    <div className="min-h-[100dvh] bg-gradient-to-b from-brand-50 to-earth-50">
+      <div className="mx-auto flex min-h-[100dvh] max-w-md flex-col justify-center px-5 py-8">
+        <div className="mb-6 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Sprout className="h-7 w-7 text-brand-600" />
+            <span className="text-xl font-bold text-brand-700">FarmAdvisor</span>
+          </div>
+          <LanguageSwitcher />
         </div>
-        <h1 className="text-xl font-bold text-gray-800 mb-1 text-center">{t('welcome')}</h1>
-        <p className="text-sm text-gray-500 text-center mb-6">{t('subtitle')}</p>
 
-        {error && (
-          <div className="flex items-center gap-2 bg-red-50 text-red-600 rounded-xl px-4 py-3 mb-4 text-sm">
-            <AlertCircle className="w-4 h-4 flex-shrink-0" />{error}
-          </div>
-        )}
+        <div className="rounded-3xl bg-white p-6 shadow-sm">
+          <h1 className="text-lg font-bold text-gray-900">Welcome back</h1>
+          <p className="mt-1 text-sm text-gray-500">Login with your phone number and OTP.</p>
 
-        <form onSubmit={handleLogin} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">{t('phone')}</label>
-            <div className="relative">
-              <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <span className="absolute left-10 top-1/2 -translate-y-1/2 text-sm font-medium text-gray-500">+91</span>
-              <input value={phone} onChange={e => setPhone(toTenDigitPhone(e.target.value))} placeholder={t('phonePlaceholder')} inputMode="numeric"
-                className="w-full pl-20 pr-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-400 text-sm" required />
+          {notice && !error && (
+            <div className="mt-4 flex items-center gap-2 rounded-xl bg-brand-50 px-4 py-3 text-sm text-brand-700">
+              <AlertCircle className="h-4 w-4 shrink-0" />{notice}
             </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">{t('password')}</label>
-            <div className="relative">
-              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input type={showPassword ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)} placeholder={t('passwordPlaceholder')}
-                className="w-full pl-10 pr-11 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-400 text-sm" required />
-              <button type="button" onClick={() => setShowPassword(prev => !prev)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 focus:outline-none focus:text-brand-600"
-                aria-label={showPassword ? 'Hide password' : 'Show password'}>
-                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
+          )}
+
+          {error && (
+            <div className="mt-4 flex items-center gap-2 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600">
+              <AlertCircle className="h-4 w-4 shrink-0" />{error}
             </div>
+          )}
+
+          <label className="mt-5 block text-sm font-medium text-gray-700">Phone number</label>
+          <div className="mt-1 flex gap-2">
+            <div className="relative flex-1">
+              <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <span className="absolute left-9 top-1/2 -translate-y-1/2 text-sm text-gray-500">+91</span>
+              <input
+                value={phone}
+                inputMode="numeric"
+                onChange={(e) => { setPhone(toTenDigitPhone(e.target.value)); setOtpSent(false); }}
+                placeholder="10-digit mobile"
+                className="w-full rounded-xl border border-gray-300 py-3 pl-[4.5rem] pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={sendOtp}
+              disabled={busy || !phoneValid}
+              className="shrink-0 rounded-xl border border-brand-300 px-4 text-sm font-semibold text-brand-700 hover:bg-brand-50 disabled:opacity-40"
+            >
+              {otpSent ? 'Resend' : 'Send OTP'}
+            </button>
           </div>
-          <button type="submit" disabled={loading}
-            className="w-full bg-brand-600 text-white py-3 rounded-xl hover:bg-brand-700 disabled:opacity-50 font-semibold flex items-center justify-center gap-2">
-            {loading && <Loader2 className="w-4 h-4 animate-spin" />}
-            {loading ? t('loggingIn') : t('loginBtn')}
+
+          {otpSent && (
+            <>
+              {devCode && (
+                <div className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-700">
+                  Demo mode — your OTP is <span className="font-bold">{devCode}</span>
+                </div>
+              )}
+              <label className="mt-4 block text-sm font-medium text-gray-700">Enter OTP</label>
+              <div className="relative mt-1">
+                <ShieldCheck className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <input
+                  value={otp}
+                  inputMode="numeric"
+                  onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="6-digit OTP"
+                  className="w-full rounded-xl border border-gray-300 py-3 pl-10 pr-4 text-sm tracking-widest focus:outline-none focus:ring-2 focus:ring-brand-400"
+                />
+              </div>
+            </>
+          )}
+
+          <button
+            type="button"
+            onClick={login}
+            disabled={busy || !otpSent || !otpValid}
+            className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 py-3 font-semibold text-white hover:bg-brand-700 disabled:opacity-40"
+          >
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            Login
           </button>
-        </form>
+        </div>
 
-        <p className="text-sm text-center text-gray-500 mt-6">
-          {t('newFarmer')}{' '}
-          <Link href="/register" className="text-brand-600 hover:text-brand-800 font-medium">{t('registerHere')}</Link>
+        <p className="mt-6 text-center text-sm text-gray-500">
+          New farmer?{' '}
+          <Link href="/register" className="font-medium text-brand-600 hover:text-brand-800">Register here</Link>
         </p>
-        <p className="text-xs text-center text-gray-400 mt-4">{t('copyright')}</p>
       </div>
     </div>
   );
 }
- 

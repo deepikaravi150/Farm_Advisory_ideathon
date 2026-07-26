@@ -11,6 +11,10 @@ import type { Milestone } from '@/lib/types/crop-plan';
 import { mirrorCropPlanToS3, deleteCropPlanFromS3, tryMirror } from '@/lib/farmer-s3-store';
 import { getSuitableCrops, type SoilSnapshot } from '@/lib/crop-suitability';
 import { getCropInfo } from '@/lib/crop-info';
+import { localizePlans, type PlanLocale } from '@/lib/crop-plan-translate';
+
+// Plan generation makes a large LLM call; allow up to 60s on Vercel.
+export const maxDuration = 60;
 
 /** Best-effort 16-day forecast for the farmer's saved land centroid. */
 async function getFarmerForecast(profile: Record<string, unknown> | null): Promise<ForecastDay[]> {
@@ -42,7 +46,11 @@ export async function GET(req: NextRequest) {
     Limit: 20,
   });
 
-  return NextResponse.json(plans);
+  const localeParam = req.nextUrl.searchParams.get('locale');
+  const locale: PlanLocale = localeParam === 'hi' || localeParam === 'ta' ? localeParam : 'en';
+  const localized = await localizePlans(plans, locale);
+
+  return NextResponse.json(localized);
 }
 
 export async function DELETE(req: NextRequest) {
@@ -298,35 +306,81 @@ function formatSoilReportContext(soilData: Record<string, unknown> | undefined) 
   ].filter(Boolean).join('\n');
 }
 
+const FALLBACK_SOIL_NOTE: Record<'en' | 'hi' | 'ta', string> = {
+  en: 'No soil report is available, so confirm nutrient dose locally before applying fertilizer.',
+  hi: 'कोई मिट्टी रिपोर्ट उपलब्ध नहीं है, इसलिए उर्वरक डालने से पहले स्थानीय रूप से पोषक तत्व की मात्रा की पुष्टि करें।',
+  ta: 'மண் அறிக்கை எதுவும் கிடைக்கவில்லை, எனவே உரம் இடுவதற்கு முன் உள்ளூர் அளவில் ஊட்டச்சத்து அளவை உறுதிப்படுத்தவும்.',
+};
+
+const FALLBACK_SOIL_REPORT_LABEL: Record<'en' | 'hi' | 'ta', string> = {
+  en: 'Current soil report details:',
+  hi: 'वर्तमान मिट्टी रिपोर्ट विवरण:',
+  ta: 'தற்போதைய மண் அறிக்கை விவரங்கள்:',
+};
+
+const FALLBACK_WEATHER_REQUIREMENT: Record<'en' | 'hi' | 'ta', string> = {
+  en: 'Avoid heavy rain, waterlogging, and strong wind during field operations. Prefer mild weather with workable soil moisture.',
+  hi: 'खेत के काम के दौरान भारी बारिश, जलभराव और तेज हवा से बचें। हल्के मौसम और काम करने योग्य मिट्टी की नमी को प्राथमिकता दें।',
+  ta: 'வயல் வேலைகளின் போது கனமழை, நீர் தேங்குதல் மற்றும் பலத்த காற்றைத் தவிர்க்கவும். மிதமான வானிலை மற்றும் வேலை செய்யக்கூடிய மண் ஈரப்பதத்தை விரும்பவும்.',
+};
+
+function fallbackStorageNotes(crop: string, locale: 'en' | 'hi' | 'ta'): string {
+  if (locale === 'hi') return `उचित सुखाने के बाद ${crop} को साफ, सूखे बैग या कंटेनर में स्टोर करें। उपज को नमी और कीटों से दूर रखें।`;
+  if (locale === 'ta') return `சரியாக உலர்த்திய பிறகு ${crop} ஐ சுத்தமான, உலர்ந்த பைகள் அல்லது கொள்கலன்களில் சேமிக்கவும். விளைபொருளை ஈரப்பதம் மற்றும் பூச்சிகளிலிருந்து விலக்கி வைக்கவும்.`;
+  return `Store ${crop} in clean, dry bags or containers after proper drying. Keep produce away from moisture and pests.`;
+}
+
+function fallbackStages(crop: string, soilNote: string, locale: 'en' | 'hi' | 'ta') {
+  if (locale === 'hi') return [
+    { label: 'भूमि तैयारी', summary: 'जुताई करें, समतल करें और खेत तैयार करने के लिए खाद डालें।', offset: 0, days: 7, cost: 12000, task: `${crop} के लिए खरपतवार हटाएं, खेत की जुताई करें, ढेलों को तोड़ें और भूमि को समतल करें। अच्छी तरह सड़ी हुई गोबर खाद डालें और खेत की ढलान के अनुसार जल निकासी सुधारें। ${soilNote}` },
+    { label: 'बीज चयन और उपचार', summary: 'स्वस्थ बीज खरीदें और बुवाई से पहले उपचारित करें।', offset: 7, days: 2, cost: 3500, task: `विश्वसनीय स्रोत से स्वस्थ ${crop} बीज खरीदें। बुवाई से पहले बीज को अनुशंसित जैव-उर्वरक या फफूंदनाशक से उपचारित करें, और गैप भरने के लिए पर्याप्त बीज रखें।` },
+    { label: 'बुवाई', summary: 'सही दूरी पर बुवाई करें और मिट्टी को नम रखें।', offset: 9, days: 3, cost: 9000, task: `अपनी स्थानीय किस्म के लिए सही दूरी पर ${crop} की बुवाई करें। अंकुरण के दौरान मिट्टी को नम रखें, भारी बारिश से पहले बुवाई से बचें, और आसान निराई के लिए पंक्तियों को स्पष्ट रूप से चिह्नित करें।` },
+    { label: 'सिंचाई और खरपतवार नियंत्रण', summary: 'हल्की सिंचाई करें और शुरुआत में ही खरपतवार हटाएं।', offset: 12, days: 21, cost: 8500, task: `मिट्टी की नमी के अनुसार हल्की, नियमित सिंचाई बनाए रखें। विशेष रूप से पहले तीन हफ्तों में खरपतवार जल्दी हटाएं, ताकि ${crop} पोषक तत्वों के लिए प्रतिस्पर्धा न करे।` },
+    { label: 'पोषक तत्व और कीट प्रबंधन', summary: 'विभाजित मात्रा में उर्वरक डालें और कीटों पर नज़र रखें।', offset: 33, days: 28, cost: 14500, task: `मिट्टी की रिपोर्ट और फसल की वृद्धि के आधार पर पोषक तत्वों को विभाजित मात्रा में डालें। सप्ताह में दो बार पत्तियों, तनों और फूलों का निरीक्षण करें, और लक्षण दिखने पर ही जैविक या अनुशंसित रासायनिक नियंत्रण का उपयोग करें।` },
+    { label: 'कटाई और बिक्री', summary: 'पकने पर कटाई करें, सुखाएं, छांटें और बेचें।', offset: 61, days: 14, cost: 10000, task: `जब फसल परिपक्व हो जाए और नमी उपयुक्त हो तब ${crop} की कटाई करें। बेचने से पहले उपज को साफ तरीके से सुखाएं, छांटें और भंडारित करें, सबसे अच्छे स्थानीय बाजार के समय के दौरान बेचें।` },
+  ];
+  if (locale === 'ta') return [
+    { label: 'நில தயாரிப்பு', summary: 'வயலை உழுது, சமன் செய்து, உரம் சேர்க்கவும்.', offset: 0, days: 7, cost: 12000, task: `${crop} க்காக களைகளை அகற்றி, வயலை உழுது, மண் கட்டிகளை உடைத்து, நிலத்தை சமன் செய்யவும். நன்கு மக்கிய தொழு உரத்தை சேர்த்து, வயல் சரிவுக்கு ஏற்ப வடிகால் மேம்படுத்தவும். ${soilNote}` },
+    { label: 'விதை தேர்வு மற்றும் சிகிச்சை', summary: 'நல்ல விதைகளை வாங்கி விதைப்பதற்கு முன் சிகிச்சை செய்யவும்.', offset: 7, days: 2, cost: 3500, task: `நம்பகமான மூலத்திலிருந்து ஆரோக்கியமான ${crop} விதைகளை வாங்கவும். விதைப்பதற்கு முன் பரிந்துரைக்கப்பட்ட உயிர் உரம் அல்லது பூஞ்சைக்கொல்லியால் விதையை சிகிச்சை செய்யவும், இடைவெளி நிரப்புவதற்கு போதுமான விதைகளை வைத்திருங்கள்.` },
+    { label: 'விதைப்பு', summary: 'சரியான இடைவெளியில் விதைத்து மண்ணை ஈரமாக வைக்கவும்.', offset: 9, days: 3, cost: 9000, task: `உங்கள் உள்ளூர் வகைக்கு ஏற்ற சரியான இடைவெளியில் ${crop} ஐ விதைக்கவும். முளைக்கும் போது மண்ணை ஈரமாக வைக்கவும், கனமழைக்கு முன் விதைப்பதைத் தவிர்க்கவும், எளிதான களை எடுப்புக்காக வரிசைகளை தெளிவாக குறிக்கவும்.` },
+    { label: 'நீர்ப்பாசனம் மற்றும் களை கட்டுப்பாடு', summary: 'லேசாக நீர் பாய்ச்சி, ஆரம்பத்திலேயே களைகளை அகற்றவும்.', offset: 12, days: 21, cost: 8500, task: `மண் ஈரப்பதத்திற்கு ஏற்ப லேசான, தொடர்ச்சியான நீர்ப்பாசனத்தை பராமரிக்கவும். குறிப்பாக முதல் மூன்று வாரங்களில் களைகளை விரைவில் அகற்றவும், இதனால் ${crop} ஊட்டச்சத்துக்களுக்காக போட்டியிடாது.` },
+    { label: 'ஊட்டச்சத்து மற்றும் பூச்சி மேலாண்மை', summary: 'பிரிக்கப்பட்ட அளவில் உரம் இடவும், பூச்சிகளை கவனிக்கவும்.', offset: 33, days: 28, cost: 14500, task: `மண் அறிக்கை மற்றும் பயிர் வளர்ச்சியின் அடிப்படையில் ஊட்டச்சத்துக்களை பிரிக்கப்பட்ட அளவுகளில் இடவும். வாரத்திற்கு இரண்டு முறை இலைகள், தண்டுகள் மற்றும் பூக்களை ஆய்வு செய்யவும், அறிகுறிகள் தென்படும்போது மட்டுமே உயிரியல் அல்லது பரிந்துரைக்கப்பட்ட இரசாயன கட்டுப்பாட்டைப் பயன்படுத்தவும்.` },
+    { label: 'அறுவடை மற்றும் விற்பனை', summary: 'முதிர்ச்சியடைந்தவுடன் அறுவடை செய்து, உலர்த்தி, தரம் பிரித்து விற்கவும்.', offset: 61, days: 14, cost: 10000, task: `பயிர் முதிர்ச்சியடைந்து ஈரப்பதம் பொருத்தமாக இருக்கும்போது ${crop} ஐ அறுவடை செய்யவும். சிறந்த உள்ளூர் சந்தை காலத்தில் விற்பதற்கு முன் விளைபொருளை சுத்தமாக உலர்த்தி, தரம் பிரித்து, சேமிக்கவும்.` },
+  ];
+  return [
+    { label: 'Land Preparation', summary: 'Plough, level and add manure to ready the field.', offset: 0, days: 7, cost: 12000, task: `Clear weeds, plough the field, break clods, and level the land for ${crop}. Add well-decomposed farmyard manure and improve drainage based on the field slope. ${soilNote}` },
+    { label: 'Seed Selection and Treatment', summary: 'Buy healthy seed and treat it before sowing.', offset: 7, days: 2, cost: 3500, task: `Buy healthy ${crop} seed from a reliable source. Treat seed with recommended biofertilizer or fungicide before sowing, and keep enough seed for gap filling.` },
+    { label: 'Sowing', summary: 'Sow at correct spacing and keep soil moist.', offset: 9, days: 3, cost: 9000, task: `Sow ${crop} at the right spacing for your local variety. Keep soil moist during germination, avoid sowing before heavy rain, and mark rows clearly for easy weeding.` },
+    { label: 'Irrigation and Weed Control', summary: 'Water lightly and remove weeds early.', offset: 12, days: 21, cost: 8500, task: `Maintain light, regular irrigation according to soil moisture. Remove weeds early, especially during the first three weeks, so ${crop} does not compete for nutrients.` },
+    { label: 'Nutrient and Pest Management', summary: 'Apply split fertilizer and watch for pests.', offset: 33, days: 28, cost: 14500, task: `Apply nutrients in split doses based on the soil report and crop growth. Inspect leaves, stems, and flowers twice a week, and use biological or recommended chemical control only when symptoms are seen.` },
+    { label: 'Harvesting and Selling', summary: 'Harvest at maturity, dry, grade and sell.', offset: 61, days: 14, cost: 10000, task: `Harvest ${crop} when the crop reaches maturity and moisture is suitable. Dry, grade, and store the produce cleanly before selling during the best local market window.` },
+  ];
+}
+
 function buildFallbackPlan(
   cropName: string,
   startDate: string,
   profile: Record<string, unknown> | null,
-  soilData: Record<string, unknown> | undefined
+  soilData: Record<string, unknown> | undefined,
+  locale: 'en' | 'hi' | 'ta' = 'en'
 ): NormalizedPlan {
   const acres = Number(profile?.land_area_acres ?? 1) || 1;
   const crop = cropName.trim();
   const soilNote = soilData
-    ? `Current soil report details:\n${formatSoilReportContext(soilData)}`
-    : 'No soil report is available, so confirm nutrient dose locally before applying fertilizer.';
-  const stages = [
-    { label: 'Land Preparation', offset: 0, days: 7, cost: 12000, task: `Clear weeds, plough the field, break clods, and level the land for ${crop}. Add well-decomposed farmyard manure and improve drainage based on the field slope. ${soilNote}` },
-    { label: 'Seed Selection and Treatment', offset: 7, days: 2, cost: 3500, task: `Buy healthy ${crop} seed from a reliable source. Treat seed with recommended biofertilizer or fungicide before sowing, and keep enough seed for gap filling.` },
-    { label: 'Sowing', offset: 9, days: 3, cost: 9000, task: `Sow ${crop} at the right spacing for your local variety. Keep soil moist during germination, avoid sowing before heavy rain, and mark rows clearly for easy weeding.` },
-    { label: 'Irrigation and Weed Control', offset: 12, days: 21, cost: 8500, task: `Maintain light, regular irrigation according to soil moisture. Remove weeds early, especially during the first three weeks, so ${crop} does not compete for nutrients.` },
-    { label: 'Nutrient and Pest Management', offset: 33, days: 28, cost: 14500, task: `Apply nutrients in split doses based on the soil report and crop growth. Inspect leaves, stems, and flowers twice a week, and use biological or recommended chemical control only when symptoms are seen.` },
-    { label: 'Harvesting and Selling', offset: 61, days: 14, cost: 10000, task: `Harvest ${crop} when the crop reaches maturity and moisture is suitable. Dry, grade, and store the produce cleanly before selling during the best local market window.` },
-  ];
+    ? `${FALLBACK_SOIL_REPORT_LABEL[locale]}\n${formatSoilReportContext(soilData)}`
+    : FALLBACK_SOIL_NOTE[locale];
+  const stages = fallbackStages(crop, soilNote, locale);
 
   const milestones = stages.map((stage, index) => ({
     id: String(index + 1),
     label: stage.label,
+    summary: stage.summary,
     date: addDays(startDate, stage.offset),
     endDate: addDays(startDate, stage.offset + stage.days),
     durationDays: stage.days,
     tasks: stage.task,
     estimatedCost: Math.round(stage.cost * acres),
-    weatherRequirement: 'Avoid heavy rain, waterlogging, and strong wind during field operations. Prefer mild weather with workable soil moisture.',
+    weatherRequirement: FALLBACK_WEATHER_REQUIREMENT[locale],
   }));
 
   return {
@@ -336,7 +390,7 @@ function buildFallbackPlan(
     totalBudgetEstimate: milestones.reduce((sum, stage) => sum + stage.estimatedCost, 0),
     harvestDate: addDays(startDate, 75),
     sellWindow: `${addDays(startDate, 76)} to ${addDays(startDate, 90)}`,
-    storageNotes: `Store ${crop} in clean, dry bags or containers after proper drying. Keep produce away from moisture and pests.`,
+    storageNotes: fallbackStorageNotes(crop, locale),
   };
 }
 
@@ -348,7 +402,11 @@ async function persistPlan(
   inputDetails?: Record<string, unknown>,
   // When provided, the existing plan is updated in place (same id) instead of a
   // new copy being created. This is what makes an "edit" stay on the same plan.
-  planId?: string
+  planId?: string,
+  // Language the milestone/crop text in `plan` is actually written in. Recorded
+  // so the read path knows when it needs to translate for the farmer's current
+  // UI language (see lib/crop-plan-translate.ts).
+  contentLocale?: 'en' | 'hi' | 'ta'
 ) {
   const alertStages = plan.milestones.filter((m) => m.alert).map((m) => m.label);
   const now = new Date().toISOString();
@@ -359,11 +417,12 @@ async function persistPlan(
   let effectiveStage = currentStage;
   let effectiveInputDetails = inputDetails ?? {};
   let activeFrom: string | undefined;
+  let existing: Record<string, unknown> | null = null;
 
   // Editing an existing plan: keep its id and preserve fields the edit payload
   // doesn't carry (creation time, active status/date, current stage, assessment).
   if (planId) {
-    const existing = await getItem(Tables.CROP_PLANS, { farmer_id: farmerId, plan_id: planId });
+    existing = await getItem(Tables.CROP_PLANS, { farmer_id: farmerId, plan_id: planId });
     if (existing) {
       createdAt = (existing.created_at as string) ?? now;
       effectiveStatus = (existing.status as string) ?? status;
@@ -392,6 +451,10 @@ async function persistPlan(
     active_from: activeFrom, // undefined is stripped by removeUndefinedValues
     created_at: createdAt,
     updated_at: now,
+    content_locale: contentLocale ?? (existing?.content_locale as string | undefined) ?? 'en',
+    // The saved text just changed (new/edited content) — any cached translations
+    // from before this edit no longer match, so drop them rather than serve stale text.
+    translations: contentLocale ? {} : ((existing?.translations as Record<string, unknown> | undefined) ?? {}),
   };
   await putItem(Tables.CROP_PLANS, item);
   await tryMirror('crop plan save', () => mirrorCropPlanToS3(item));
@@ -412,6 +475,9 @@ const SavePlanSchema = z.object({
     storageNotes: z.string().default(''),
   }),
   inputDetails: z.record(z.unknown()).optional(),
+  // Language the saved plan text is written in (e.g. after an AI-assisted edit
+  // produced localized text). Optional — omitted when the edit doesn't change language.
+  locale: z.enum(['en', 'hi', 'ta']).optional(),
 });
 
 const ActivatePlanSchema = z.object({
@@ -433,7 +499,7 @@ export async function POST(req: NextRequest) {
 
     // Branch: persist a plan the farmer selected from AI suggestions.
     if (body?.action === 'save') {
-      const { plan, inputDetails, planId } = SavePlanSchema.parse(body);
+      const { plan, inputDetails, planId, locale: savedLocale } = SavePlanSchema.parse(body);
       const today = new Date().toISOString().split('T')[0];
       const savedPlan = await persistPlan(
         farmer.farmerId,
@@ -441,7 +507,8 @@ export async function POST(req: NextRequest) {
         'planned',
         null,
         inputDetails,
-        planId
+        planId,
+        savedLocale
       );
       return NextResponse.json({ success: true, savedPlan });
     }
@@ -538,6 +605,7 @@ export async function POST(req: NextRequest) {
            {
              "id": "1",
              "label": "short stage name",
+             "summary": "ONE short at-a-glance sentence (max ~12 words) a farmer can read in 2 seconds, e.g. 'Plough, level and add manure to ready the field'",
              "date": "YYYY-MM-DD (stage start)",
              "endDate": "YYYY-MM-DD (stage end)",
              "durationDays": number,
@@ -562,7 +630,7 @@ ${soilContext}
          - Today: ${today}
          - Farmer wants to start on: ${startDate}${assessmentText}${forecastBlock}
 
-         Write every farmer-facing text value in ${outputLanguage}: cropName, suitabilityReason, adjustments, milestone labels, tasks, weatherRequirement, sellWindow, and storageNotes.
+         Write every farmer-facing text value in ${outputLanguage}: cropName, suitabilityReason, adjustments, milestone labels, summaries, tasks, weatherRequirement, sellWindow, and storageNotes.
          Keep JSON keys, dates, IDs, numbers, and currency values in English/standard format.
 
          First check whether ${cropName} can realistically grow in this farmer's area/land/soil using the DB details above.
@@ -595,7 +663,7 @@ ${soilContext}
 ${soilContext}
          - Today: ${today}${assessmentText}${forecastBlock}
 
-         Write every farmer-facing text value in ${outputLanguage}: cropName, currentStage, milestone labels, tasks, weatherRequirement, sellWindow, storageNotes, and immediateAction.
+         Write every farmer-facing text value in ${outputLanguage}: cropName, currentStage, milestone labels, summaries, tasks, weatherRequirement, sellWindow, storageNotes, and immediateAction.
          Keep JSON keys, dates, IDs, numbers, and currency values in English/standard format.
 
          First check whether ${cropName} can realistically grow in this farmer's area/land/soil using the DB details above.
@@ -645,7 +713,7 @@ Make the plan practical for a farmer to execute in the field.${memoryContext ? `
         suitable: true,
         suitabilityReason: `${cropName} can be planned using the farmer profile and soil details available in the database.`,
         adjustments: 'Confirm exact seed variety and fertilizer dose with local advisory before field application.',
-        plan: buildFallbackPlan(cropName, startDate, profile, soilData),
+        plan: buildFallbackPlan(cropName, startDate, profile, soilData, data.locale),
       };
     }
 
@@ -657,7 +725,7 @@ Make the plan practical for a farmer to execute in the field.${memoryContext ? `
     }) as Record<string, unknown> | undefined;
     let rawPlan = (planData.plan ?? matchingSuggestion ?? planData) as Record<string, unknown>;
     if (!rawPlan.milestones && !rawPlan.remainingMilestones) {
-      rawPlan = buildFallbackPlan(cropName, startDate, profile, soilData) as unknown as Record<string, unknown>;
+      rawPlan = buildFallbackPlan(cropName, startDate, profile, soilData, data.locale) as unknown as Record<string, unknown>;
       planData.plan = rawPlan;
     }
     const normalized = normalizePlan(rawPlan, startDate, cropName);
@@ -677,7 +745,9 @@ Make the plan practical for a farmer to execute in the field.${memoryContext ? `
         normalized,
         data.farmerState === 'mid_grow' ? 'active' : 'planned',
         (planData.currentStage as string) ?? null,
-        inputDetails
+        inputDetails,
+        undefined,
+        data.locale
       );
       planData.savedPlan = savedPlan;
     }

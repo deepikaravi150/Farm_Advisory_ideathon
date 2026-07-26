@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { getPhoneVerificationStatus, normalizePhoneNumber, sendPhoneVerificationOtp } from '@/lib/aws/sns';
+import { sendOtp } from '@/lib/otp';
 import { toTenDigitPhone } from '@/lib/phone';
 
 const SendOtpSchema = z.object({
@@ -9,19 +9,16 @@ const SendOtpSchema = z.object({
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { phone } = SendOtpSchema.parse(body);
-
-    await sendPhoneVerificationOtp(phone);
-    const status = await getPhoneVerificationStatus(phone);
+    const { phone } = SendOtpSchema.parse(await req.json());
+    const result = await sendOtp(phone);
 
     return NextResponse.json({
       success: true,
-      phoneNumber: normalizePhoneNumber(phone),
-      snsSandboxStatus: status,
-      message: status === 'Verified'
-        ? 'Phone number is already verified in AWS SNS.'
-        : 'AWS SNS verification OTP sent to this phone number.',
+      mock: result.mock,
+      channel: result.channel,
+      // devCode is only present in demo/mock mode so the UI can show the code.
+      devCode: result.devCode,
+      message: result.message,
     });
   } catch (err) {
     if (err instanceof z.ZodError) {

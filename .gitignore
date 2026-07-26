@@ -25,3 +25,8 @@ npm-debug.log*
 # misc
 .DS_Store
 *.pem
+.vercel
+
+# local data exports / office temp files
+farmer-profiles.xlsx
+~$*

@@ -27,6 +27,11 @@ const UpdateSchema = z.object({
   typography: z.string().optional(),
   landAreaAcres: z.number().optional(),
   landPictureS3Key: z.string().optional(),
+  // Optional fields that sharpen government-scheme eligibility matching.
+  community: z.string().optional(),
+  gender: z.enum(['male', 'female']).optional(),
+  age: z.number().int().min(0).max(120).optional(),
+  annualIncome: z.number().min(0).optional(),
 });
 
 export async function PATCH(req: NextRequest) {
@@ -45,6 +50,10 @@ export async function PATCH(req: NextRequest) {
     if (data.typography) { updates.push('typography = :t'); values[':t'] = data.typography; }
     if (data.landAreaAcres) { updates.push('land_area_acres = :la'); values[':la'] = data.landAreaAcres; }
     if (data.landPictureS3Key) { updates.push('land_picture_s3_key = :lp'); values[':lp'] = data.landPictureS3Key; }
+    if (data.community !== undefined) { updates.push('community = :comm'); values[':comm'] = data.community; }
+    if (data.gender !== undefined) { updates.push('gender = :g'); values[':g'] = data.gender; }
+    if (data.age !== undefined) { updates.push('#age = :age'); names['#age'] = 'age'; values[':age'] = data.age; }
+    if (data.annualIncome !== undefined) { updates.push('annual_income = :inc'); values[':inc'] = data.annualIncome; }
 
     if (!updates.length) return NextResponse.json({ error: 'Nothing to update' }, { status: 400 });
 

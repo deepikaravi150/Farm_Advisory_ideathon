@@ -1,165 +1,334 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import dynamic from 'next/dynamic';
-import { useTranslations } from 'next-intl';
-import { CheckCircle2, Eye, EyeOff, Sprout } from 'lucide-react';
-import FarmerDetailsForm, { type FarmerFormData } from '@/components/register/FarmerDetailsForm';
+import QRCode from 'qrcode';
+import { Sprout, CreditCard, Phone, ShieldCheck, CheckCircle2, MapPin, Maximize, Languages, Landmark, Loader2, MessageCircle } from 'lucide-react';
 import LanguageSwitcher from '@/components/layout/LanguageSwitcher';
+import { toTenDigitPhone } from '@/lib/phone';
 
-const LandMapSelector = dynamic(() => import('@/components/register/LandMapSelector'), {
-  ssr: false,
-  loading: () => <div className="h-80 bg-gray-100 rounded-2xl animate-pulse flex items-center justify-center text-gray-400">Loading map...</div>,
-});
+interface GovRecord {
+  farmerId: string;
+  name: string;
+  district: string;
+  address: string;
+  landAreaAcres: number;
+  typography: string;
+  preferredLanguage: 'en' | 'hi' | 'ta';
+  surveyNumber: string;
+  aadhaarMasked: string;
+  category: string;
+}
 
-interface Coordinate { lat: number; lng: number; }
-type Step = 'details' | 'map' | 'password';
+interface JoinInfo {
+  link: string;
+  keyword: string;
+  otpChannel: 'mock' | 'whatsapp' | 'sns';
+}
+
+const LANG_LABEL: Record<string, string> = { en: 'English', ta: 'தமிழ்', hi: 'हिन्दी' };
 
 export default function RegisterPage() {
   const router = useRouter();
-  const t = useTranslations('register');
-  const tc = useTranslations('common');
-  const [step, setStep] = useState<Step>('details');
-  const [formData, setFormData] = useState<FarmerFormData | null>(null);
-  const [coords, setCoords] = useState<Coordinate[]>([]);
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [step, setStep] = useState<'verify' | 'confirm'>('verify');
+
+  const [farmerId, setFarmerId] = useState('');
+  const [phone, setPhone] = useState('');
+  const [otp, setOtp] = useState('');
+  const [otpSent, setOtpSent] = useState(false);
+  const [devCode, setDevCode] = useState('');
+  const [sentNote, setSentNote] = useState('');
+  const [record, setRecord] = useState<GovRecord | null>(null);
+
+  const [join, setJoin] = useState<JoinInfo | null>(null);
+  const [qr, setQr] = useState('');
+
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
-  const passwordRules = [
-    { label: 'At least 8 characters', valid: password.length >= 8 },
-    { label: 'One uppercase letter', valid: /[A-Z]/.test(password) },
-    { label: 'One lowercase letter', valid: /[a-z]/.test(password) },
-    { label: 'One number', valid: /\d/.test(password) },
-    { label: 'One special character', valid: /[^A-Za-z0-9]/.test(password) },
-  ];
-  const isPasswordStrong = passwordRules.every((rule) => rule.valid);
+  const idValid = /^TN\d{11}$/.test(farmerId.trim().toUpperCase());
+  const phoneValid = /^\d{10}$/.test(phone);
+  const otpValid = /^\d{6}$/.test(otp);
 
-  function onDetailsNext(data: FarmerFormData) {
+  // Decide whether to show the WhatsApp join flow, and prep the QR for desktop.
+  useEffect(() => {
+    fetch('/api/auth/whatsapp-join')
+      .then((r) => r.json())
+      .then((d: Partial<JoinInfo>) => {
+        const info: JoinInfo = {
+          link: d.link ?? '',
+          keyword: d.keyword ?? '',
+          otpChannel: (d.otpChannel as JoinInfo['otpChannel']) ?? 'mock',
+        };
+        setJoin(info);
+        if (info.link) {
+          QRCode.toDataURL(info.link, { width: 200, margin: 1 }).then(setQr).catch(() => {});
+        }
+      })
+      .catch(() => setJoin({ link: '', keyword: '', otpChannel: 'mock' }));
+  }, []);
+
+  const useWhatsAppJoin = Boolean(join && join.otpChannel === 'whatsapp' && join.link);
+
+  async function sendOtp() {
     setError('');
-    setFormData(data);
-    setStep('map');
+    setBusy(true);
+    try {
+      const res = await fetch('/api/auth/otp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(typeof data.error === 'string' ? data.error : 'Could not send OTP'); return; }
+      setOtpSent(true);
+      setDevCode(typeof data.devCode === 'string' ? data.devCode : '');
+      setSentNote(data.channel === 'whatsapp' ? 'We sent your 6-digit code on WhatsApp. Enter it below.' : '');
+    } catch { setError('Could not send OTP'); }
+    finally { setBusy(false); }
   }
 
-  async function register() {
-    if (password !== confirmPassword) { setError(t('errPasswordsNoMatch')); return; }
-    if (!isPasswordStrong) { setError('Password must meet all security requirements'); return; }
-    setLoading(true);
+  async function verifyAndFetch() {
     setError('');
+    setBusy(true);
+    try {
+      const verifyRes = await fetch('/api/auth/otp/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, otp }),
+      });
+      const verifyData = await verifyRes.json();
+      if (!verifyRes.ok) { setError(typeof verifyData.error === 'string' ? verifyData.error : 'Incorrect OTP'); return; }
+
+      const lookupRes = await fetch(`/api/auth/gov-lookup?farmerId=${encodeURIComponent(farmerId.trim().toUpperCase())}&phone=${encodeURIComponent(phone)}`);
+      const lookupData = await lookupRes.json();
+      if (!lookupRes.ok) {
+        // No matching Farmer ID anywhere (gov registry or our DB) — nothing to
+        // register, so send them to login instead of showing a dead-end error.
+        router.push('/login');
+        return;
+      }
+      if (lookupData.alreadyRegistered) {
+        router.push('/login?notice=exists');
+        return;
+      }
+      setRecord(lookupData.record as GovRecord);
+      setStep('confirm');
+    } catch { setError('Verification failed. Please try again.'); }
+    finally { setBusy(false); }
+  }
+
+  async function confirmAndCreate() {
+    setError('');
+    setBusy(true);
     try {
       const res = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...formData, landCoordinates: coords, password }),
+        body: JSON.stringify({ farmerId: farmerId.trim().toUpperCase(), phone, otp }),
       });
       const data = await res.json();
-      if (!res.ok) { setError(typeof data.error === 'string' ? data.error : t('failed')); return; }
-      router.push('/login?registered=1');
-    } catch { setError(t('failed')); }
-    finally { setLoading(false); }
+      if (!res.ok) { setError(typeof data.error === 'string' ? data.error : 'Registration failed'); return; }
+      router.push('/today');
+      router.refresh();
+    } catch { setError('Registration failed. Please try again.'); }
+    finally { setBusy(false); }
   }
 
-  const steps = [t('stepDetails'), t('stepLandMap'), t('stepPassword')];
-  const stepIndex = { details: 0, map: 1, password: 2 }[step];
-
   return (
-    <div className="min-h-screen bg-gradient-to-br from-brand-50 to-earth-50 flex items-center justify-center p-4">
-      <div className="absolute right-4 top-4">
-        <LanguageSwitcher />
-      </div>
-      <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-2xl">
-        <div className="flex items-center gap-2 justify-center mb-6">
-          <Sprout className="w-7 h-7 text-brand-600" />
-          <span className="text-xl font-bold text-brand-700">{t('title')}</span>
+    <div className="min-h-[100dvh] bg-gradient-to-b from-brand-50 to-earth-50">
+      <div className="mx-auto flex min-h-[100dvh] max-w-md flex-col px-5 py-8">
+        <div className="mb-6 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Sprout className="h-7 w-7 text-brand-600" />
+            <span className="text-xl font-bold text-brand-700">FarmAdvisor</span>
+          </div>
+          <LanguageSwitcher />
         </div>
 
-        {/* Step indicators */}
-        <div className="flex items-center justify-center gap-2 mb-8">
-          {steps.map((s, i) => (
-            <div key={s} className="flex items-center gap-2">
-              <div className={`w-7 h-7 rounded-full flex items-center justify-center text-sm font-medium ${i <= stepIndex ? 'bg-brand-600 text-white' : 'bg-gray-200 text-gray-500'}`}>{i + 1}</div>
-              <span className={`text-sm ${i === stepIndex ? 'font-semibold text-brand-700' : 'text-gray-400'}`}>{s}</span>
-              {i < steps.length - 1 && <div className="w-8 h-0.5 bg-gray-200" />}
-            </div>
-          ))}
-        </div>
+        {step === 'verify' && (
+          <div className="rounded-3xl bg-white p-6 shadow-sm">
+            <h1 className="text-lg font-bold text-gray-900">Sign up with your Farmer ID</h1>
+            <p className="mt-1 text-sm text-gray-500">We&apos;ll fetch your details from government records — no long forms.</p>
 
-        {step === 'details' && <FarmerDetailsForm onNext={onDetailsNext} />}
-
-        {step === 'map' && (
-          <div className="space-y-4">
-            <LandMapSelector onChange={setCoords} initialAddress={formData?.address} />
-            <div className="flex gap-3">
-              <button onClick={() => setStep('details')} className="flex-1 border border-gray-300 text-gray-600 py-3 rounded-xl hover:bg-gray-50">{tc('back')}</button>
-              <button onClick={() => setStep('password')} disabled={coords.length < 3}
-                className="flex-1 bg-brand-600 text-white py-3 rounded-xl hover:bg-brand-700 disabled:opacity-40 font-semibold">
-                {t('nextSetPassword')}
-              </button>
+            <label className="mt-5 block text-sm font-medium text-gray-700">Government Farmer ID</label>
+            <div className="relative mt-1">
+              <CreditCard className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input
+                value={farmerId}
+                onChange={(e) => setFarmerId(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 13))}
+                placeholder="TN10000000001"
+                className="w-full rounded-xl border border-gray-300 py-3 pl-10 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400"
+              />
             </div>
+
+            <label className="mt-4 block text-sm font-medium text-gray-700">Phone number</label>
+            <div className="relative mt-1">
+              <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <span className="absolute left-9 top-1/2 -translate-y-1/2 text-sm text-gray-500">+91</span>
+              <input
+                value={phone}
+                inputMode="numeric"
+                onChange={(e) => { setPhone(toTenDigitPhone(e.target.value)); setOtpSent(false); }}
+                placeholder="10-digit mobile"
+                className="w-full rounded-xl border border-gray-300 py-3 pl-[4.5rem] pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400"
+              />
+            </div>
+
+            {idValid && phoneValid && join && (
+              useWhatsAppJoin ? (
+                <div className="mt-5 rounded-2xl border border-brand-100 bg-brand-50/60 p-4">
+                  <div className="flex items-center gap-2 text-brand-700">
+                    <MessageCircle className="h-5 w-5" />
+                    <span className="text-sm font-semibold">Verify on WhatsApp</span>
+                  </div>
+
+                  <div className="mt-3 text-sm text-gray-600">
+                    <p><span className="font-semibold text-gray-800">1.</span> Open WhatsApp and send the ready-made message to join FarmAdvisor.</p>
+                    <a
+                      href={join.link}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-[#25D366] py-2.5 font-semibold text-white hover:brightness-95"
+                    >
+                      <MessageCircle className="h-4 w-4" /> Open WhatsApp to join
+                    </a>
+                    {join.keyword && (
+                      <p className="mt-1 text-center text-xs text-gray-400">Sends &ldquo;join {join.keyword}&rdquo;</p>
+                    )}
+                    {qr && (
+                      <div className="mt-3 flex flex-col items-center">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={qr} alt="Scan to join FarmAdvisor on WhatsApp" className="h-36 w-36 rounded-lg border border-gray-200 bg-white p-1" />
+                        <p className="mt-1 text-xs text-gray-400">On a computer? Scan with your phone.</p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="mt-4 text-sm text-gray-600">
+                    <p><span className="font-semibold text-gray-800">2.</span> Joined? Get your verification code:</p>
+                    <button
+                      type="button"
+                      onClick={sendOtp}
+                      disabled={busy}
+                      className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-brand-300 py-2.5 text-sm font-semibold text-brand-700 hover:bg-brand-50 disabled:opacity-40"
+                    >
+                      {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                      {otpSent ? 'Resend OTP on WhatsApp' : 'Send my OTP'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={sendOtp}
+                  disabled={busy}
+                  className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-brand-300 py-2.5 text-sm font-semibold text-brand-700 hover:bg-brand-50 disabled:opacity-40"
+                >
+                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                  {otpSent ? 'Resend OTP' : 'Send OTP'}
+                </button>
+              )
+            )}
+
+            {otpSent && (
+              <>
+                {devCode && (
+                  <div className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-700">
+                    Demo mode — your OTP is <span className="font-bold">{devCode}</span>
+                  </div>
+                )}
+                {sentNote && (
+                  <div className="mt-3 rounded-xl bg-brand-50 px-3 py-2 text-sm text-brand-700">{sentNote}</div>
+                )}
+                <label className="mt-4 block text-sm font-medium text-gray-700">Enter OTP</label>
+                <div className="relative mt-1">
+                  <ShieldCheck className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <input
+                    value={otp}
+                    inputMode="numeric"
+                    onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    placeholder="6-digit OTP"
+                    className="w-full rounded-xl border border-gray-300 py-3 pl-10 pr-4 text-sm tracking-widest focus:outline-none focus:ring-2 focus:ring-brand-400"
+                  />
+                </div>
+              </>
+            )}
+
+            {error && <p className="mt-3 text-sm text-red-500">{error}</p>}
+
+            <button
+              type="button"
+              onClick={verifyAndFetch}
+              disabled={busy || !otpSent || !otpValid}
+              className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 py-3 font-semibold text-white hover:bg-brand-700 disabled:opacity-40"
+            >
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Verify &amp; Fetch My Details
+            </button>
+
+            <p className="mt-4 rounded-xl bg-slate-50 px-3 py-2 text-xs text-gray-500">
+              Demo accounts: <span className="font-medium text-gray-700">TN10000000001 / 9876500001</span> ·
+              <span className="font-medium text-gray-700"> TN10000000004 / 9876500004</span>
+            </p>
           </div>
         )}
 
-        {step === 'password' && (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (!loading) register();
-            }}
-            className="space-y-4 max-w-sm mx-auto"
-          >
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">{t('createPassword')}</label>
-              <div className="relative">
-                <input type={showPassword ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)} placeholder={t('createPasswordPlaceholder')}
-                  className="w-full border border-gray-300 rounded-xl pl-4 pr-11 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-400 text-sm" />
-                <button type="button" onClick={() => setShowPassword(prev => !prev)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 focus:outline-none focus:text-brand-600"
-                  aria-label={showPassword ? 'Hide password' : 'Show password'}>
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-              <div className="mt-2 grid grid-cols-1 gap-1">
-                {passwordRules.map((rule) => (
-                  <p key={rule.label} className={`flex items-center gap-1.5 text-xs ${rule.valid ? 'text-brand-600' : 'text-gray-400'}`}>
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    {rule.label}
-                  </p>
-                ))}
-              </div>
+        {step === 'confirm' && record && (
+          <div className="rounded-3xl bg-white p-6 shadow-sm">
+            <div className="flex items-center gap-2 text-brand-700">
+              <Landmark className="h-5 w-5" />
+              <h1 className="text-lg font-bold">Confirm your details</h1>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">{t('confirmPassword')}</label>
-              <div className="relative">
-                <input type={showConfirmPassword ? 'text' : 'password'} value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder={t('confirmPasswordPlaceholder')}
-                  className="w-full border border-gray-300 rounded-xl pl-4 pr-11 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-400 text-sm" />
-                <button type="button" onClick={() => setShowConfirmPassword(prev => !prev)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 focus:outline-none focus:text-brand-600"
-                  aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}>
-                  {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
+            <p className="mt-1 text-sm text-gray-500">Fetched from government records. Confirm to continue.</p>
+
+            <div className="mt-4 space-y-3">
+              <Detail icon={<CheckCircle2 className="h-4 w-4 text-brand-600" />} label="Name" value={record.name} />
+              <Detail icon={<MapPin className="h-4 w-4 text-brand-600" />} label="Location" value={record.address} />
+              <Detail icon={<Maximize className="h-4 w-4 text-brand-600" />} label="Land" value={`${record.landAreaAcres} acres · ${record.typography}`} />
+              <Detail icon={<Languages className="h-4 w-4 text-brand-600" />} label="Language" value={LANG_LABEL[record.preferredLanguage] ?? record.preferredLanguage} />
+              <Detail icon={<CreditCard className="h-4 w-4 text-brand-600" />} label="Survey / Aadhaar" value={`Survey ${record.surveyNumber} · ${record.aadhaarMasked}`} />
+              <Detail icon={<Landmark className="h-4 w-4 text-brand-600" />} label="Category" value={record.category} />
             </div>
-            {error && <p className="text-red-500 text-sm">{error}</p>}
-            <div className="flex gap-3">
-              <button type="button" onClick={() => setStep('map')} className="flex-1 border border-gray-300 text-gray-600 py-3 rounded-xl hover:bg-gray-50">{tc('back')}</button>
-              <button type="submit" disabled={loading}
-                className="flex-1 bg-brand-600 text-white py-3 rounded-xl hover:bg-brand-700 disabled:opacity-40 font-semibold">
-                {loading ? t('creating') : t('createAccount')}
-              </button>
-            </div>
-          </form>
+
+            {error && <p className="mt-3 text-sm text-red-500">{error}</p>}
+
+            <button
+              type="button"
+              onClick={confirmAndCreate}
+              disabled={busy}
+              className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 py-3 font-semibold text-white hover:bg-brand-700 disabled:opacity-40"
+            >
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Confirm &amp; Continue
+            </button>
+            <button
+              type="button"
+              onClick={() => { setStep('verify'); setError(''); }}
+              className="mt-2 w-full rounded-xl border border-gray-300 py-2.5 text-sm text-gray-600 hover:bg-gray-50"
+            >
+              Back
+            </button>
+          </div>
         )}
 
-        <p className="text-sm text-center text-gray-500 mt-6">
-          {t('alreadyRegistered')}{' '}
-          <Link href="/login" className="text-brand-600 hover:text-brand-800 font-medium">{t('loginLink')}</Link>
+        <p className="mt-6 text-center text-sm text-gray-500">
+          Already registered?{' '}
+          <Link href="/login" className="font-medium text-brand-600 hover:text-brand-800">Login</Link>
         </p>
       </div>
     </div>
   );
 }
- 
+
+function Detail({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+  return (
+    <div className="flex items-start gap-3 rounded-xl bg-slate-50 px-3 py-2.5">
+      <span className="mt-0.5">{icon}</span>
+      <div className="min-w-0">
+        <p className="text-xs text-gray-400">{label}</p>
+        <p className="text-sm font-medium text-gray-800">{value}</p>
+      </div>
+    </div>
+  );
+}
