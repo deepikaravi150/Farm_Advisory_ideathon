@@ -48,7 +48,7 @@ export default function MoneyView({ hasPlan, cropName, marketCommodity }: { hasP
       let avg = 0;
       try {
         if (marketCommodity) {
-          const m: MarketResp = await (await fetch(`/api/market-prices?commodity=${encodeURIComponent(marketCommodity)}`)).json();
+          const m: MarketResp = await (await fetch(`/api/market-prices?commodity=${encodeURIComponent(marketCommodity)}&locale=${locale}`)).json();
           if (!cancelled) setMarket(m);
           if (m.available && m.avgModal) avg = m.avgModal;
         }

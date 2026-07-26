@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useLocale } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { Leaf, Plus, Loader2, Trash2, CheckCircle2, Coins, Scissors, MessageSquarePlus, ChevronDown } from 'lucide-react';
 import StateAssessmentModal, { type AssessmentPayload } from '@/components/crop-plan/StateAssessmentModal';
 import CropSuggestions from '@/components/crop-plan/CropSuggestions';
@@ -35,6 +35,7 @@ function upsert(plans: SavedPlan[], plan: SavedPlan) {
 
 export default function PlanPage() {
   const locale = useLocale() as 'en' | 'hi' | 'ta';
+  const t = useTranslations('cropPlan');
   const [savedPlans, setSavedPlans] = useState<SavedPlan[]>([]);
   const [activePlan, setActivePlan] = useState<SavedPlan | null>(null);
   const [suggestions, setSuggestions] = useState<SuggestedCrop[]>([]);
@@ -48,10 +49,13 @@ export default function PlanPage() {
 
   useEffect(() => {
     refreshPlans().catch(() => setShowModal(true)).finally(() => setInitialLoading(false));
-  }, []);
+    // Re-fetch when the farmer switches language so saved plan text (stages,
+    // tasks, etc.) is translated for the newly selected locale.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locale]);
 
   async function refreshPlans() {
-    const res = await fetch('/api/crop-plan', { cache: 'no-store' });
+    const res = await fetch(`/api/crop-plan?locale=${locale}`, { cache: 'no-store' });
     const plans = await res.json();
     if (Array.isArray(plans) && plans.length > 0) {
       const normalized = plans.map(toSavedPlan);
@@ -73,7 +77,7 @@ export default function PlanPage() {
       await refreshPlans();
       return;
     }
-    setError('Plan was not created. Please try again.');
+    setError(t('notCreated'));
   }
 
   async function onAssessmentSubmit(state: FarmerState, payload: AssessmentPayload) {
@@ -92,6 +96,7 @@ export default function PlanPage() {
           currentCropInfo: payload.info,
           startDate: payload.startDate,
           assessment: payload.assessment,
+          locale,
         }),
       });
       const data = await res.json();
@@ -105,7 +110,7 @@ export default function PlanPage() {
       }
       await applyGeneratedPlan(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Plan generation failed. Please try again.');
+      setError(err instanceof Error ? err.message : t('generationFailed'));
     } finally {
       setLoading(false);
     }
@@ -124,13 +129,14 @@ export default function PlanPage() {
           cropName: crop.cropName,
           startDate: suggestionContext?.startDate,
           assessment: suggestionContext?.assessment,
+          locale,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(typeof data?.error === 'string' ? data.error : 'Plan generation failed');
       await applyGeneratedPlan(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Plan generation failed. Please try again.');
+      setError(err instanceof Error ? err.message : t('generationFailed'));
     } finally {
       setLoading(false);
       setSuggestionContext(null);
@@ -164,7 +170,7 @@ export default function PlanPage() {
       const res = await fetch('/api/crop-plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'save', plan: updated, inputDetails: activePlan?.inputDetails, planId }),
+        body: JSON.stringify({ action: 'save', plan: updated, inputDetails: activePlan?.inputDetails, planId, locale }),
       });
       const data = await res.json();
       if (data.savedPlan) {
@@ -188,9 +194,9 @@ export default function PlanPage() {
       <div className="mb-4 flex items-start justify-between">
         <div>
           <h1 className="flex items-center gap-2 text-xl font-bold text-gray-900">
-            <Leaf className="h-5 w-5 text-brand-600" /> Crop Plan
+            <Leaf className="h-5 w-5 text-brand-600" /> {t('title')}
           </h1>
-          <p className="text-sm text-gray-500">Your season, stage by stage.</p>
+          <p className="text-sm text-gray-500">{t('subtitle')}</p>
         </div>
         <LanguageSwitcher />
       </div>
@@ -219,7 +225,7 @@ export default function PlanPage() {
             onClick={() => setShowModal(true)}
             className="flex shrink-0 items-center gap-1 rounded-full border border-dashed border-brand-300 px-3 py-1.5 text-sm font-medium text-brand-700"
           >
-            <Plus className="h-4 w-4" /> New
+            <Plus className="h-4 w-4" /> {t('newButton')}
           </button>
         </div>
       )}
@@ -228,8 +234,8 @@ export default function PlanPage() {
       {loading && (
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <Loader2 className="mb-3 h-9 w-9 animate-spin text-brand-600" />
-          <p className="font-medium text-brand-700">Generating your crop plan…</p>
-          <p className="mt-1 text-sm text-gray-500">Analyzing your land, soil and season.</p>
+          <p className="font-medium text-brand-700">{t('generatingTitle')}</p>
+          <p className="mt-1 text-sm text-gray-500">{t('generatingSubtitle')}</p>
         </div>
       )}
 
@@ -244,13 +250,13 @@ export default function PlanPage() {
       {!loading && !activePlan && suggestions.length === 0 && (
         <div className="rounded-2xl border border-dashed border-brand-300 bg-white p-8 text-center">
           <Leaf className="mx-auto h-9 w-9 text-brand-500" />
-          <h2 className="mt-2 font-semibold text-gray-900">No crop plan yet</h2>
-          <p className="mt-1 text-sm text-gray-500">Answer a few questions and AI will build your season plan.</p>
+          <h2 className="mt-2 font-semibold text-gray-900">{t('noPlanTitle')}</h2>
+          <p className="mt-1 text-sm text-gray-500">{t('noPlanSubtitle')}</p>
           <button
             onClick={() => setShowModal(true)}
             className="mt-4 rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-brand-700"
           >
-            Build my crop plan
+            {t('buildPlan')}
           </button>
         </div>
       )}
@@ -264,7 +270,7 @@ export default function PlanPage() {
               <h2 className="text-lg font-bold">{activePlan.cropName}</h2>
               {activePlan.status === 'active' ? (
                 <span className="flex items-center gap-1 rounded-full bg-white/20 px-2.5 py-1 text-xs font-semibold">
-                  <CheckCircle2 className="h-3.5 w-3.5" /> Active
+                  <CheckCircle2 className="h-3.5 w-3.5" /> {t('active')}
                 </span>
               ) : (
                 <button
@@ -272,21 +278,21 @@ export default function PlanPage() {
                   disabled={saving}
                   className="rounded-full bg-white/20 px-3 py-1 text-xs font-semibold hover:bg-white/30"
                 >
-                  Make active
+                  {t('makeActive')}
                 </button>
               )}
             </div>
             <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
               <div className="rounded-xl bg-white/10 p-2">
-                <div className="flex items-center justify-center gap-1 font-semibold"><Coins className="h-3.5 w-3.5" />Budget</div>
+                <div className="flex items-center justify-center gap-1 font-semibold"><Coins className="h-3.5 w-3.5" />{t('budget')}</div>
                 <div className="mt-0.5 text-sm font-bold">₹{activePlan.totalBudgetEstimate.toLocaleString('en-IN')}</div>
               </div>
               <div className="rounded-xl bg-white/10 p-2">
-                <div className="font-semibold">Stages</div>
+                <div className="font-semibold">{t('stages')}</div>
                 <div className="mt-0.5 text-sm font-bold">{activePlan.milestones.length}</div>
               </div>
               <div className="rounded-xl bg-white/10 p-2">
-                <div className="flex items-center justify-center gap-1 font-semibold"><Scissors className="h-3.5 w-3.5" />Harvest</div>
+                <div className="flex items-center justify-center gap-1 font-semibold"><Scissors className="h-3.5 w-3.5" />{t('harvest')}</div>
                 <div className="mt-0.5 text-[11px] font-semibold">{activePlan.harvestDate || '—'}</div>
               </div>
             </div>
@@ -294,15 +300,15 @@ export default function PlanPage() {
 
           {/* Stages */}
           <div>
-            <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-400">Stages — tap to expand</h3>
+            <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-400">{t('stagesTapToExpand')}</h3>
             <StageAccordion milestones={activePlan.milestones} locale={locale} />
           </div>
 
           {/* Sell window / storage */}
           {(activePlan.sellWindow || activePlan.storageNotes) && (
             <div className="rounded-2xl bg-white p-4 text-sm text-gray-700 shadow-sm">
-              {activePlan.sellWindow && <p><span className="font-semibold">Sell window:</span> {activePlan.sellWindow}</p>}
-              {activePlan.storageNotes && <p className="mt-1"><span className="font-semibold">Storage:</span> {activePlan.storageNotes}</p>}
+              {activePlan.sellWindow && <p><span className="font-semibold">{t('sellWindowLabel')}</span> {activePlan.sellWindow}</p>}
+              {activePlan.storageNotes && <p className="mt-1"><span className="font-semibold">{t('storageLabel')}</span> {activePlan.storageNotes}</p>}
             </div>
           )}
 
@@ -313,7 +319,7 @@ export default function PlanPage() {
               className="flex w-full items-center justify-between p-4 text-left"
             >
               <span className="flex items-center gap-2 text-sm font-semibold text-gray-800">
-                <MessageSquarePlus className="h-4 w-4 text-brand-600" /> Ask or change this plan
+                <MessageSquarePlus className="h-4 w-4 text-brand-600" /> {t('askOrChange')}
               </span>
               <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform ${showAdjust ? 'rotate-180' : ''}`} />
             </button>
@@ -328,11 +334,11 @@ export default function PlanPage() {
           <div className="flex items-center justify-between pt-1">
             {activePlan.status === 'active' ? (
               <button onClick={() => planAction('deactivate', activePlan.planId)} disabled={saving}
-                className="text-sm font-medium text-amber-700">Make inactive</button>
+                className="text-sm font-medium text-amber-700">{t('makeInactive')}</button>
             ) : <span />}
             <button onClick={() => deletePlan(activePlan.planId)}
               className="flex items-center gap-1 text-sm font-medium text-red-500">
-              <Trash2 className="h-4 w-4" /> Delete plan
+              <Trash2 className="h-4 w-4" /> {t('deletePlan')}
             </button>
           </div>
         </div>

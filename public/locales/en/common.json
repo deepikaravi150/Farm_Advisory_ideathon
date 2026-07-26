@@ -134,6 +134,19 @@
   "dashboard": {
     "greeting": "Good day, {name}!"
   },
+  "today": {
+    "greeting": "Hello, {name} 👋",
+    "focusLabel": "Today's focus",
+    "focusFallback": "Open your crop plan to see what to do today.",
+    "weatherFine": "Weather is fine for your crop this week.",
+    "noPlanTitle": "No crop plan yet",
+    "noPlanSubtitle": "Create a plan to get a daily to-do list tailored to your field.",
+    "buildPlan": "Build my crop plan",
+    "todoToday": "To do today",
+    "prepareAhead": "Prepare ahead",
+    "daysAway": "in {days}d",
+    "checkin": "Daily check-in"
+  },
   "weather": {
     "humidity": "Humidity",
     "wind": "Wind",
@@ -155,7 +168,12 @@
     "emptyHint": "Ask me anything about farming, crops, weather, or market prices.",
     "thinking": "Thinking...",
     "listen": "Listen",
-    "error": "Sorry, something went wrong. Please try again."
+    "error": "Sorry, something went wrong. Please try again.",
+    "checkinBadge": "Check-in",
+    "newChatTitle": "New chat",
+    "newChatButton": "New",
+    "remove": "Remove",
+    "attach": "Attach"
   },
   "voice": {
     "startInput": "Start voice input",
@@ -168,7 +186,24 @@
     "newPlan": "New Plan",
     "generatingTitle": "Generating your personalized crop plan...",
     "generatingSubtitle": "Analyzing your land, soil data, and seasonal conditions",
-    "storageNotesTitle": "Storage & Selling Notes"
+    "storageNotesTitle": "Storage & Selling Notes",
+    "newButton": "New",
+    "noPlanTitle": "No crop plan yet",
+    "noPlanSubtitle": "Answer a few questions and AI will build your season plan.",
+    "buildPlan": "Build my crop plan",
+    "active": "Active",
+    "makeActive": "Make active",
+    "budget": "Budget",
+    "stages": "Stages",
+    "harvest": "Harvest",
+    "stagesTapToExpand": "Stages — tap to expand",
+    "sellWindowLabel": "Sell window:",
+    "storageLabel": "Storage:",
+    "askOrChange": "Ask or change this plan",
+    "makeInactive": "Make inactive",
+    "deletePlan": "Delete plan",
+    "notCreated": "Plan was not created. Please try again.",
+    "generationFailed": "Plan generation failed. Please try again."
   },
   "suggestions": {
     "title": "Recommended Crops for Your Land",
@@ -262,7 +297,8 @@
     "annualIncome": "Annual income (₹)",
     "male": "Male",
     "female": "Female",
-    "notSpecified": "Not specified"
+    "notSpecified": "Not specified",
+    "govSyncNote": "Details synced from government records."
   },
   "soil": {
     "analyzing": "Analyzing soil report with AI...",

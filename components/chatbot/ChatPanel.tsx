@@ -171,12 +171,12 @@ export default function ChatPanel({ initialMessages = [], chatId, chatTimestamp,
           <span className="font-semibold">{t('title')}</span>
           {mode === 'checkin' && (
             <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-white/20 px-2 py-0.5 text-xs font-medium">
-              <ClipboardCheck className="h-3 w-3" /> Check-in
+              <ClipboardCheck className="h-3 w-3" /> {t('checkinBadge')}
             </span>
           )}
         </div>
-        <button onClick={startNewChat} title="New chat" className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs hover:bg-white/15">
-          <RotateCcw className="h-3.5 w-3.5" /> New
+        <button onClick={startNewChat} title={t('newChatTitle')} className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs hover:bg-white/15">
+          <RotateCcw className="h-3.5 w-3.5" /> {t('newChatButton')}
         </button>
       </div>
 
@@ -222,7 +222,7 @@ export default function ChatPanel({ initialMessages = [], chatId, chatTimestamp,
             <span className="flex-1 text-xs text-gray-500">
               {locale === 'ta' ? 'பயிர் புகைப்படம் இணைக்கப்பட்டது' : locale === 'hi' ? 'फसल फोटो जुड़ी' : 'Crop photo attached'}
             </span>
-            <button type="button" onClick={clearImage} title="Remove" className="text-gray-400 hover:text-red-500"><X className="h-4 w-4" /></button>
+            <button type="button" onClick={clearImage} title={t('remove')} className="text-gray-400 hover:text-red-500"><X className="h-4 w-4" /></button>
           </div>
         )}
         <div className="flex items-end gap-2">
@@ -252,7 +252,7 @@ export default function ChatPanel({ initialMessages = [], chatId, chatTimestamp,
             <button
               type="button"
               onClick={() => setAttachOpen((v) => !v)}
-              title="Attach"
+              title={t('attach')}
               className="rounded-xl bg-gray-100 p-2.5 text-gray-600 transition-colors hover:bg-gray-200"
             >
               <Plus className={`h-4 w-4 transition-transform ${attachOpen ? 'rotate-45' : ''}`} />

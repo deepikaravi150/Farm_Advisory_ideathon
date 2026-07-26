@@ -7,6 +7,7 @@ import { extractCentroid } from '@/lib/utils';
 import { get15DayForecast, type ForecastDay } from '@/lib/weather';
 import { getActiveCropPlans } from '@/lib/daily-sms';
 import { buildTodayPlan } from '@/lib/today-plan';
+import { localizePlans, type PlanLocale } from '@/lib/crop-plan-translate';
 import TodayView from '@/components/today/TodayView';
 
 export default async function TodayPage() {
@@ -18,10 +19,12 @@ export default async function TodayPage() {
   const locale = await getLocale();
   const today = new Date().toISOString().split('T')[0];
 
-  const [profile, plans] = await Promise.all([
+  const [profile, rawPlans] = await Promise.all([
     getItem(Tables.FARMER_PROFILES, { farmer_id: farmer.farmerId }),
     getActiveCropPlans(farmer.farmerId),
   ]);
+  const planLocale: PlanLocale = locale === 'hi' || locale === 'ta' ? locale : 'en';
+  const plans = await localizePlans(rawPlans, planLocale);
 
   const coords = (profile?.land_coordinates as Array<{ lat: number; lng: number }>) ?? [];
   const center = coords.length ? extractCentroid(coords) : null;

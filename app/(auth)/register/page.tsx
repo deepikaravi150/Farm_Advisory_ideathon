@@ -102,7 +102,16 @@ export default function RegisterPage() {
 
       const lookupRes = await fetch(`/api/auth/gov-lookup?farmerId=${encodeURIComponent(farmerId.trim().toUpperCase())}&phone=${encodeURIComponent(phone)}`);
       const lookupData = await lookupRes.json();
-      if (!lookupRes.ok) { setError(typeof lookupData.error === 'string' ? lookupData.error : 'No record found'); return; }
+      if (!lookupRes.ok) {
+        // No matching Farmer ID anywhere (gov registry or our DB) — nothing to
+        // register, so send them to login instead of showing a dead-end error.
+        router.push('/login');
+        return;
+      }
+      if (lookupData.alreadyRegistered) {
+        router.push('/login?notice=exists');
+        return;
+      }
       setRecord(lookupData.record as GovRecord);
       setStep('confirm');
     } catch { setError('Verification failed. Please try again.'); }

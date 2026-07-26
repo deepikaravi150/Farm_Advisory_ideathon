@@ -35,6 +35,9 @@ export const Tables = {
   // Farmer financial ledger (expenses / crop sales / loans).
   // financial_entries: PK farmer_id, SK entry_id
   FINANCIAL_ENTRIES: 'financial_entries',
+  // Shared cache of translated market/commodity/place names (data.gov.in Agmarknet
+  // data is English-only at the source). PK text_key = "<en text>#<locale>".
+  MARKET_I18N: 'market_i18n',
 } as const;
 
 export async function putItem(table: string, item: Record<string, unknown>) {

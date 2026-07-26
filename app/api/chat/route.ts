@@ -26,10 +26,29 @@ const ChatSchema = z.object({
   chatTimestamp: z.string().optional(),
 });
 
+const ATTACH_TYPE_ERROR: Record<'en' | 'hi' | 'ta', string> = {
+  en: 'Please attach a JPEG, PNG, or WEBP photo.',
+  hi: 'कृपया JPEG, PNG, या WEBP फोटो संलग्न करें।',
+  ta: 'JPEG, PNG அல்லது WEBP புகைப்படத்தை இணைக்கவும்.',
+};
+
+const ATTACH_SIZE_ERROR: Record<'en' | 'hi' | 'ta', string> = {
+  en: 'Image too large. Please attach a photo under 10 MB.',
+  hi: 'फोटो बहुत बड़ी है। कृपया 10 MB से छोटी फोटो संलग्न करें।',
+  ta: 'படம் மிகப் பெரியது. 10 MB க்கும் குறைவான புகைப்படத்தை இணைக்கவும்.',
+};
+
+const CHAT_FAILED_ERROR: Record<'en' | 'hi' | 'ta', string> = {
+  en: 'Chat failed',
+  hi: 'चैट विफल रही',
+  ta: 'அரட்டை தோல்வியடைந்தது',
+};
+
 export async function POST(req: NextRequest) {
   const farmer = getAuthFarmer(req);
   if (!farmer) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
+  let localeForError: 'en' | 'hi' | 'ta' = 'en';
   try {
     // The chat accepts plain JSON (text/voice) or multipart/form-data when the
     // farmer attaches a crop photo. Only switch to formData on multipart so the
@@ -50,6 +69,7 @@ export async function POST(req: NextRequest) {
       const imageFile = (form.get('file') as File | null) ?? null;
       const rawLocale = String(form.get('locale') ?? 'en');
       locale = (['en', 'hi', 'ta'].includes(rawLocale) ? rawLocale : 'en') as 'en' | 'hi' | 'ta';
+      localeForError = locale;
       mode = String(form.get('mode') ?? 'normal') === 'checkin' ? 'checkin' : 'normal';
       const caption = String(form.get('message') ?? '').trim();
       message = caption || (locale === 'ta'
@@ -66,10 +86,10 @@ export async function POST(req: NextRequest) {
       if (imageFile && imageFile.size > 0) {
         const allowed = ['image/jpeg', 'image/png', 'image/webp'];
         if (!allowed.includes(imageFile.type)) {
-          return NextResponse.json({ error: 'Please attach a JPEG, PNG, or WEBP photo.' }, { status: 400 });
+          return NextResponse.json({ error: ATTACH_TYPE_ERROR[locale] }, { status: 400 });
         }
         if (imageFile.size > 10 * 1024 * 1024) {
-          return NextResponse.json({ error: 'Image too large. Please attach a photo under 10 MB.' }, { status: 400 });
+          return NextResponse.json({ error: ATTACH_SIZE_ERROR[locale] }, { status: 400 });
         }
         image = {
           buffer: Buffer.from(await imageFile.arrayBuffer()),
@@ -81,6 +101,7 @@ export async function POST(req: NextRequest) {
       const parsed = ChatSchema.parse(await req.json());
       message = parsed.message;
       locale = parsed.locale;
+      localeForError = locale;
       mode = parsed.mode;
       history = parsed.history;
       chatId = parsed.chatId;
@@ -101,7 +122,7 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     if (err instanceof z.ZodError) return NextResponse.json({ error: err.errors }, { status: 400 });
     console.error('Chat error:', err);
-    return NextResponse.json({ error: 'Chat failed' }, { status: 500 });
+    return NextResponse.json({ error: CHAT_FAILED_ERROR[localeForError] }, { status: 500 });
   }
 }
 

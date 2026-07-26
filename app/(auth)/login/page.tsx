@@ -1,6 +1,6 @@
 'use client';
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useLocale } from 'next-intl';
 import { Sprout, Phone, ShieldCheck, Loader2, AlertCircle } from 'lucide-react';
@@ -8,7 +8,16 @@ import LanguageSwitcher from '@/components/layout/LanguageSwitcher';
 import { toTenDigitPhone } from '@/lib/phone';
 
 export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
+  );
+}
+
+function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const locale = useLocale();
   const [phone, setPhone] = useState('');
   const [otp, setOtp] = useState('');
@@ -16,6 +25,9 @@ export default function LoginPage() {
   const [devCode, setDevCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const notice = searchParams.get('notice') === 'exists'
+    ? 'This Farmer ID is already registered. Please login with your phone number.'
+    : '';
 
   const phoneValid = /^\d{10}$/.test(phone);
   const otpValid = /^\d{6}$/.test(otp);
@@ -68,6 +80,12 @@ export default function LoginPage() {
         <div className="rounded-3xl bg-white p-6 shadow-sm">
           <h1 className="text-lg font-bold text-gray-900">Welcome back</h1>
           <p className="mt-1 text-sm text-gray-500">Login with your phone number and OTP.</p>
+
+          {notice && !error && (
+            <div className="mt-4 flex items-center gap-2 rounded-xl bg-brand-50 px-4 py-3 text-sm text-brand-700">
+              <AlertCircle className="h-4 w-4 shrink-0" />{notice}
+            </div>
+          )}
 
           {error && (
             <div className="mt-4 flex items-center gap-2 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600">

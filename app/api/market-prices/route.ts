@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
+import { translateMarketNames } from '@/lib/market-translate';
 
 const RESOURCE_ID = '9ef84268-d588-465a-a308-a864a43d0070';
 const SAMPLE_KEY = '579b464db66ec23bdd000001cdd3946e44ce4aad7209ff7b23ac571b';
@@ -95,6 +96,8 @@ export async function GET(req: NextRequest) {
 
   const commodity = (req.nextUrl.searchParams.get('commodity') ?? '').trim();
   const state = (req.nextUrl.searchParams.get('state') ?? 'Tamil Nadu').trim();
+  const localeParam = req.nextUrl.searchParams.get('locale');
+  const locale: 'en' | 'hi' | 'ta' = localeParam === 'hi' || localeParam === 'ta' ? localeParam : 'en';
   if (!commodity) return NextResponse.json({ available: false, reason: 'no_commodity' });
 
   const apiKey = process.env.DATA_GOV_IN_API_KEY?.trim() || SAMPLE_KEY;
@@ -140,6 +143,21 @@ export async function GET(req: NextRequest) {
 
     const avgModal = Math.round(markets.reduce((sum, market) => sum + market.modal, 0) / markets.length);
 
+    // The Agmarknet source data is English-only; translate place/product names
+    // for the farmer's chosen language (cached — see lib/market-translate.ts).
+    const namesToTranslate = [
+      result.commodity,
+      ...markets.flatMap((m) => [m.market, m.district, m.variety]),
+    ].filter((s): s is string => Boolean(s));
+    const nameMap = await translateMarketNames(namesToTranslate, locale);
+    const translatedMarkets = markets.map((m) => ({
+      ...m,
+      market: nameMap[m.market] ?? m.market,
+      district: nameMap[m.district] ?? m.district,
+      variety: nameMap[m.variety] ?? m.variety,
+    }));
+    const translatedCommodity = nameMap[result.commodity] ?? result.commodity;
+
     let trend: 'up' | 'down' | 'flat' | null = null;
     if (sortedDates.length > 1) {
       const prev = byDate.get(sortedDates[1]) ?? [];
@@ -153,12 +171,12 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       available: true,
-      commodity: result.commodity,
+      commodity: translatedCommodity,
       state,
       date: latestRecords[0]?.arrival_date ?? null,
       avgModal,
       trend,
-      markets,
+      markets: translatedMarkets,
       source: 'data.gov.in',
     });
   } catch (err) {

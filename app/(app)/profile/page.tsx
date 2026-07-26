@@ -4,10 +4,27 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import ProfileCard from '@/components/profile/ProfileCard';
+import SoilReportUpload from '@/components/profile/SoilReportUpload';
 import FarmerMemorySection from '@/components/profile/FarmerMemorySection';
 import LanguageSwitcher from '@/components/layout/LanguageSwitcher';
-import { Loader2, Landmark, LogOut, ChevronRight } from 'lucide-react';
+import { Loader2, Landmark, LogOut, ChevronRight, FlaskConical } from 'lucide-react';
 import type { Fact } from '@/lib/memory';
+
+interface SoilData {
+  ph: number;
+  nitrogen: string;
+  phosphorus: string;
+  potassium: string;
+  organicCarbon: string;
+  electricalConductivity?: number | null;
+  micronutrients?: Record<string, string | null>;
+  plainLanguageSummary?: string | null;
+  keyFindings?: string[] | null;
+  recommendations: string;
+  labName: string;
+  reportDate: string;
+  locale?: string | null;
+}
 
 interface Profile {
   farmer_id: string;
@@ -32,12 +49,18 @@ export default function ProfilePage() {
   const tSchemes = useTranslations('schemes');
   const router = useRouter();
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [soilData, setSoilData] = useState<SoilData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/farmer/profile')
-      .then((r) => r.json())
-      .then(setProfile)
+    Promise.all([
+      fetch('/api/farmer/profile').then((r) => r.json()),
+      fetch('/api/soil', { cache: 'no-store' }).then((r) => r.json()).catch(() => ({ soil: null })),
+    ])
+      .then(([p, soilResponse]) => {
+        setProfile(p);
+        setSoilData(soilResponse.soil ?? null);
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -69,10 +92,18 @@ export default function ProfilePage() {
 
       <div className="space-y-4">
         <div className="flex items-center gap-2 rounded-xl bg-brand-50 px-3 py-2 text-xs font-medium text-brand-700">
-          <Landmark className="h-4 w-4" /> Details synced from government records.
+          <Landmark className="h-4 w-4" /> {t('govSyncNote')}
         </div>
 
         {profile && <ProfileCard profile={profile} onSave={saveProfile} />}
+
+        <div className="rounded-2xl bg-white p-4 shadow-sm">
+          <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold text-gray-800">
+            <FlaskConical className="h-4 w-4 text-brand-600" /> {t('soilReportTitle')}
+          </h2>
+          <p className="mb-4 text-xs text-gray-500">{t('soilReportSubtitle')}</p>
+          <SoilReportUpload initialSoil={soilData} onUploadSuccess={setSoilData} />
+        </div>
 
         <Link
           href="/schemes"
